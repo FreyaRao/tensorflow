@@ -48,6 +48,8 @@ limitations under the License.
 #include "tensorflow/core/util/saved_tensor_slice_util.h"
 #include "tensorflow/core/util/tensor_bundle/byte_swap.h"
 #include "tensorflow/core/util/tensor_slice_util.h"
+#include <boost/interprocess/shared_memory_object.hpp>
+#include <boost/interprocess/mapped_region.hpp>
 
 #ifdef PLATFORM_WINDOWS
 #undef DeleteFile
@@ -241,6 +243,26 @@ Status WriteTensor(const Tensor& val, FileOutputBuffer* out,
   return out->Append(StringPiece(buf, *bytes_written));
 }
 
+//
+Status WriteTensorShm(const Tensor& val, FileOutputBuffer* out,
+                   size_t* bytes_written, char* shm_name) {
+  DCHECK_NE(val.dtype(), DT_STRING);
+  DCHECK_NE(val.dtype(), DT_VARIANT);
+  *bytes_written = val.TotalBytes();
+  char* buf = GetBackingBuffer(val);
+  VLOG(1) << "Appending " << *bytes_written << " bytes to file";
+  return out->MemcpyToShm(StringPiece(buf, *bytes_written), shm_name);
+}
+
+//Calculate WriteTensor data Size
+size_t CalculateWriteTensor(const Tensor& val) {
+  DCHECK_NE(val.dtype(), DT_STRING);
+  DCHECK_NE(val.dtype(), DT_VARIANT);
+  size_t bytes_written = val.TotalBytes();
+  std::cout << "Nebula WriteTensor size: " << bytes_written << std::endl;
+  return bytes_written;
+}
+
 // Serializes string tensor "val".  "bytes_written" is treated in the same
 // fashion as WriteTensor().
 //
@@ -297,6 +319,86 @@ Status WriteStringTensor(const Tensor& val, FileOutputBuffer* out,
   }
   return OkStatus();
 }
+//shm
+Status WriteStringTensorShm(const Tensor& val, FileOutputBuffer* out,
+                         size_t* bytes_written, uint32* crc32c, char* shm_name) {
+  // On-disk format:
+  //   [varint64 len0]..[varint64 lenL][4 byte cksum on lengths][string bytes]
+  // Var "crc32c" checksums the string lengths (as uint64, not varint64 bytes),
+  // the length-checksum, and all the string bytes.
+  DCHECK_EQ(val.dtype(), DT_STRING);
+  const tstring* strings = GetStringBackingBuffer(val);
+
+  // Writes the varint lengths.
+  string lengths;
+  lengths.reserve(val.NumElements());  // At least 1 byte per element.
+  *crc32c = 0;
+  for (int64_t i = 0; i < val.NumElements(); ++i) {
+    const tstring* elem = &strings[i];
+    DCHECK_EQ(elem->size(), static_cast<uint64>(elem->size()));
+    const uint64 elem_size = static_cast<uint64>(elem->size());
+
+    core::PutVarint64(&lengths, elem_size);
+    if (elem_size <= UINT32_MAX) {
+      // We need to do this because older checkpoints only used uint32s and we
+      // should still support them.
+      const uint32 elem_size_uint32 = static_cast<uint32>(elem_size);
+      *crc32c = crc32c::Extend(*crc32c,
+                               reinterpret_cast<const char*>(&elem_size_uint32),
+                               sizeof(uint32));
+    } else {
+      *crc32c = crc32c::Extend(
+          *crc32c, reinterpret_cast<const char*>(&elem_size), sizeof(uint64));
+    }
+  }
+  TF_RETURN_IF_ERROR(out->Append(lengths));
+  *bytes_written = lengths.size();
+
+  // Writes the length checksum.
+  const uint32 length_checksum = crc32c::Mask(*crc32c);
+  TF_RETURN_IF_ERROR(out->MemcpyToShm(StringPiece(
+      reinterpret_cast<const char*>(&length_checksum), sizeof(uint32)), shm_name));
+  *crc32c = crc32c::Extend(
+      *crc32c, reinterpret_cast<const char*>(&length_checksum), sizeof(uint32));
+  *bytes_written += sizeof(uint32);
+
+  // Writes all the string bytes out.
+  for (int64_t i = 0; i < val.NumElements(); ++i) {
+    const tstring* string = &strings[i];
+    TF_RETURN_IF_ERROR(out->MemcpyToShm(*string, shm_name));
+    *bytes_written += string->size();
+    *crc32c = crc32c::Extend(*crc32c, string->data(), string->size());
+  }
+  return OkStatus();
+}
+//Calculate WriteStringTensor data size
+size_t CalculateWriteStringTensor(const Tensor& val) {
+  DCHECK_EQ(val.dtype(), DT_STRING);
+  size_t bytes_written = 0;
+  tstring* strings = GetStringBackingBuffer(val);
+
+  // Writes the varint lengths.
+  string lengths;
+  lengths.reserve(val.NumElements());  // At least 1 byte per element.
+  for (int64_t i = 0; i < val.NumElements(); ++i) {
+    tstring* elem = &strings[i];
+    DCHECK_EQ(elem->size(), static_cast<uint64>(elem->size()));
+    uint64 elem_size = static_cast<uint64>(elem->size());
+    core::PutVarint64(&lengths, elem_size);
+  }
+  bytes_written = lengths.size();
+
+  // Writes the length checksum.
+  bytes_written += sizeof(uint32);
+
+  // Writes all the string bytes out.
+  for (int64_t i = 0; i < val.NumElements(); ++i) {
+    tstring* string = &strings[i];
+    bytes_written += string->size();
+  }
+  std::cout << "Nebula WriteStringTensor size: " << bytes_written << std::endl;
+  return bytes_written;
+}
 
 Status WriteVariantTensor(const Tensor& val, FileOutputBuffer* out,
                           size_t* bytes_written, uint32* crc32c) {
@@ -346,8 +448,88 @@ Status WriteVariantTensor(const Tensor& val, FileOutputBuffer* out,
                        sizeof(uint32));
     *bytes_written += sizeof(uint32);
   }
-
   return OkStatus();
+}
+//shm
+Status WriteVariantTensorShm(const Tensor& val, FileOutputBuffer* out,
+                          size_t* bytes_written, uint32* crc32c, char* shm_name) {
+  // On-disk format:
+  //   [varint64 len1][bytes variant1][4 byte checksum]
+  //   ..
+  //   [varint64 lenN][bytes variantN][4 byte checksum]
+  // Var "crc32c" checksums all the lens, variant bytes, individual variant
+  // checksums (as uint32, not varint32 bytes).
+  DCHECK_EQ(val.dtype(), DT_VARIANT);
+
+  *crc32c = 0;
+  *bytes_written = 0;
+  for (int64_t i = 0; i < val.NumElements(); ++i) {
+    VariantTensorData data;
+    val.flat<Variant>()(i).Encode(&data);
+    VariantTensorDataProto proto;
+    data.ToProto(&proto);
+    string elem;
+    if (!proto.SerializeToString(&elem)) {
+      return errors::Unknown(
+          "Failed to serialize tensor data of size ", proto.ByteSizeLong(),
+          ". Tensor: ", val.flat<Variant>()(i).DebugString());
+    }
+
+    // Write the length of the serialized variant.
+    DCHECK_EQ(elem.size(), static_cast<uint64>(elem.size()));
+    const auto elem_size = static_cast<uint64>(elem.size());
+    string len;
+    core::PutVarint64(&len, elem_size);
+    TF_RETURN_IF_ERROR(out->MemcpyToShm(len, shm_name));
+    *crc32c = crc32c::Extend(*crc32c, reinterpret_cast<const char*>(&elem_size),
+                             sizeof(uint64));
+    *bytes_written += len.size();
+
+    // Write the serialized variant.
+    TF_RETURN_IF_ERROR(out->MemcpyToShm(elem, shm_name));
+    *crc32c = crc32c::Extend(*crc32c, elem.data(), elem.size());
+    *bytes_written += elem.size();
+
+    // Write the checksum.
+    const uint32 length_checksum = crc32c::Mask(*crc32c);
+    TF_RETURN_IF_ERROR(out->MemcpyToShm(StringPiece(
+        reinterpret_cast<const char*>(&length_checksum), sizeof(uint32)), shm_name));
+    *crc32c =
+        crc32c::Extend(*crc32c, reinterpret_cast<const char*>(&length_checksum),
+                       sizeof(uint32));
+    *bytes_written += sizeof(uint32);
+  }
+  return OkStatus();
+}
+//Calculate WriteVariantTensor data size
+size_t CalculateWriteVariantTensor(const Tensor& val) {
+  DCHECK_EQ(val.dtype(), DT_VARIANT);
+  size_t bytes_written = 0;
+  for (int64_t i = 0; i < val.NumElements(); ++i) {
+    VariantTensorData data;
+    val.flat<Variant>()(i).Encode(&data);
+    VariantTensorDataProto proto;
+    data.ToProto(&proto);
+    string elem;
+    if (!proto.SerializeToString(&elem)) {
+      return -1;
+    }
+
+    // Write the length of the serialized variant.
+    DCHECK_EQ(elem.size(), static_cast<uint64>(elem.size()));
+    const auto elem_size = static_cast<uint64>(elem.size());
+    string len;
+    core::PutVarint64(&len, elem_size);
+    bytes_written += len.size();
+
+    // Write the serialized variant.
+    bytes_written += elem.size();
+
+    // Write the checksum.
+    bytes_written += sizeof(uint32);
+  }
+  std::cout << "Nebula WriteVariantTensor size: " << bytes_written << std::endl;
+  return bytes_written;
 }
 
 // Returns whether "slice_spec" is a full slice, with respect to the full shape.
@@ -417,6 +599,7 @@ BundleWriter::BundleWriter(Env* env, StringPiece prefix, const Options& options)
   if (!status_.ok()) return;
 
   data_path_ = DataFilename(prefix_, 0, 1);
+  std::cout << "Nebula get filename: " << data_path_ << std::endl;
   metadata_path_ = MetaFilename(prefix_);
   if (use_temp_file_) {
     data_path_ = strings::StrCat(data_path_, ".tempstate", random::New64());
@@ -436,6 +619,33 @@ BundleWriter::BundleWriter(Env* env, StringPiece prefix, const Options& options)
       new FileOutputBuffer(wrapper.release(), 8 << 20 /* 8MB write buffer */));
 
   VLOG(1) << "Writing to file " << data_path_;
+}
+
+int BundleWriter::allocate(char* name, long size)
+{
+   using namespace boost::interprocess;
+   try{
+      // Erase previous shared memory
+      shared_memory_object::remove(name);
+
+      //Create a shared memory object.
+      shared_memory_object shm (create_only, name, read_write);
+
+      //Set size
+      // long long nBytes = 1024;
+      shm.truncate(size);
+
+      //Map the whole shared memory in this process
+      mapped_region region(shm, read_write);
+      std::cout << region.get_size() << std::endl;
+   }
+   catch(interprocess_exception &ex){
+      shared_memory_object::remove(name);
+      std::cout << ex.what() << std::endl;
+      return 1;
+   }
+   // shared_memory_object::remove(name);
+   return 0;
 }
 
 Status BundleWriter::Add(StringPiece key, const Tensor& val) {
@@ -470,9 +680,66 @@ Status BundleWriter::Add(StringPiece key, const Tensor& val) {
     entry->set_size(data_bytes_written);
     entry->set_crc32c(crc32c::Mask(crc32c));
     size_ += data_bytes_written;
+    //std::cout << "Nebula Add size: " << data_bytes_written << std::endl;
     status_ = PadAlignment(out_.get(), options_.data_alignment, &size_);
   }
   return status_;
+}
+
+Status BundleWriter::AddShm(StringPiece key, const Tensor& val, char* shm_name) {
+  if (!status_.ok()) return status_;
+  CHECK_NE(key, kHeaderEntryKey);
+  const string key_string(key);
+  if (entries_.find(key_string) != entries_.end()) {
+    status_ = errors::InvalidArgument("Adding duplicate key: ", key);
+    return status_;
+  }
+
+  BundleEntryProto* entry = &entries_[key_string];
+  entry->set_dtype(val.dtype());
+  val.shape().AsProto(entry->mutable_shape());
+  entry->set_shard_id(0);
+  entry->set_offset(size_);
+
+  // Updates the data file.
+  size_t data_bytes_written = 0;
+  uint32 crc32c = 0;
+  out_->clear_crc32c();
+  if (val.dtype() == DT_STRING) {
+    status_ = WriteStringTensorShm(val, out_.get(), &data_bytes_written, &crc32c, shm_name);
+  } else if (val.dtype() == DT_VARIANT) {
+    status_ = WriteVariantTensorShm(val, out_.get(), &data_bytes_written, &crc32c, shm_name);
+  } else {
+    status_ = WriteTensorShm(val, out_.get(), &data_bytes_written, shm_name);
+    crc32c = out_->crc32c();
+  }
+
+  if (status_.ok()) {
+    entry->set_size(data_bytes_written);
+    entry->set_crc32c(crc32c::Mask(crc32c));
+    size_ += data_bytes_written;
+    //std::cout << "Nebula Add size: " << data_bytes_written << std::endl;
+    status_ = PadAlignment(out_.get(), options_.data_alignment, &size_);
+  }
+  return status_;
+}
+
+Status BundleWriter::FlushShm(char* shm_name){
+    if (!status_.ok()) return status_;
+    status_ = out_.get()->FlushBufferShm(shm_name);
+    return status_;
+}
+
+size_t BundleWriter::CalculateTensorsSize(const Tensor& val){
+ size_t total = 0;
+ if (val.dtype() == DT_STRING) {
+   total += CalculateWriteStringTensor(val);
+ } else if (val.dtype() == DT_VARIANT) {
+   total += CalculateWriteVariantTensor(val);
+ } else {
+   total += CalculateWriteTensor(val);
+ }
+ return total;
 }
 
 Status BundleWriter::AddSlice(StringPiece full_tensor_key,
@@ -1160,7 +1427,7 @@ inline char* AlignedMalloc(size_t size) {
 }  // namespace
 
 FileOutputBuffer::FileOutputBuffer(WritableFile* file, size_t buffer_size)
-    : file_(file), position_(0), buffer_size_(buffer_size) {
+    : file_(file), position_(0), buffer_size_(buffer_size), shm_position_(0) {
   DCHECK_GT(buffer_size, 0);
   buffer_ptr_ = AlignedMalloc(buffer_size);
 }
@@ -1200,6 +1467,20 @@ Status FileOutputBuffer::Append(StringPiece data) {
   return OkStatus();
 }
 
+// Add data to shm
+Status FileOutputBuffer::MemcpyToShm(StringPiece data, char * shm_name) {
+  using namespace boost::interprocess;
+  shared_memory_object shm(open_only, shm_name, read_write);
+  // Map the whole shared memory in this process
+  mapped_region region(shm, read_write);
+  char *mem_ref = static_cast<char*>(region.get_address());
+  size_t mem_size = region.get_size();
+  // Copy the meta data from buffer to the shared memory.
+  memcpy(mem_ref + shm_position_, data.data(), data.size());
+  shm_position_ += data.size();
+  return OkStatus();
+}
+
 Status FileOutputBuffer::Close() {
   TF_RETURN_IF_ERROR(FlushBuffer(true));
   return file_->Close();
@@ -1217,5 +1498,17 @@ Status FileOutputBuffer::FlushBuffer(bool closing) {
   }
   return OkStatus();
 }
+
+Status FileOutputBuffer::FlushBufferShm(char * shm_name){
+     using namespace boost::interprocess;
+     shared_memory_object shm(open_only, shm_name, read_write);
+    // Map the whole shared memory in this process
+    mapped_region region(shm, read_write);
+    char *mem_ref = static_cast<char*>(region.get_address());
+    size_t mem_size = region.get_size();
+    TF_RETURN_IF_ERROR(file_->Append(mem_ref));
+    return OkStatus();
+}
+
 
 }  // namespace tensorflow

@@ -17,7 +17,7 @@ limitations under the License.
 
 #include <string>
 #include <vector>
-
+#include <random>
 #include "tensorflow/core/framework/bounds_check.h"
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/framework/resource_mgr.h"
@@ -87,6 +87,33 @@ void ValidateInputs(bool is_save_op, OpKernelContext* context,
   }
 }
 
+char*  random_string(std::size_t length)
+{
+    const std::string CHARACTERS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+    std::random_device random_device;
+    std::mt19937 generator(random_device());
+    std::uniform_int_distribution<> distribution(0, CHARACTERS.size() - 1);
+
+    std::string random_string;
+    for (std::size_t i = 0; i < length; ++i)
+    {
+        random_string += CHARACTERS[distribution(generator)];
+    }
+
+    return const_cast<char *>(random_string.c_str());
+}
+
+int append_to_file_directly(const void* data, size_t data_size, FILE* file) {
+    if (data_size > 0) {
+        size_t ret = fwrite(data,  1, data_size,  file);
+        if (ret != data_size) {
+            std::cout << "Fail to fwrite to file: " << ferror(file) << std::endl;
+            return -1;
+        }
+    }
+    return 0;
+}
+
 }  // namespace
 
 // Saves a list of named tensors using the tensor bundle library.
@@ -109,9 +136,24 @@ class SaveV2 : public OpKernel {
     const auto& shape_and_slices_flat = shape_and_slices.flat<tstring>();
 
     BundleWriter writer(Env::Default(), prefix_string);
+    std::cout << "Nebula prefix_string : " << prefix_string << std::endl;
     OP_REQUIRES_OK(context, writer.status());
     VLOG(1) << "BundleWriter, prefix_string: " << prefix_string;
+    size_t total_size = 0;
+    for (int i = 0 ; i < num_tensors; ++i) {
+        //const string& tensor_name = tensor_names_flat(i);
+        const Tensor& atensor = context->input(i + kFixedInputs);
+        total_size += writer.CalculateTensorsSize(atensor);
+     if (!shape_and_slices_flat(i).empty()) {
+        std::cout << "Nebula1 Tensor size: " << total_size << std::endl;
+       total_size += writer.CalculateTensorsSize(atensor);
+     }
 
+   }
+    std::cout << "Nebula2 Tensor size: " << total_size << std::endl;
+    char* shm_name = random_string(10);
+    std::cout << "Nebula shm name: " << shm_name << std::endl;
+    writer.allocate(shm_name, total_size);
     for (int i = 0; i < num_tensors; ++i) {
       const string& tensor_name = tensor_names_flat(i);
       const Tensor& tensor = context->input(i + kFixedInputs);
@@ -135,7 +177,7 @@ class SaveV2 : public OpKernel {
         OP_REQUIRES_OK(context,
                        writer.AddSlice(tensor_name, shape, slice, tensor));
       } else {
-        OP_REQUIRES_OK(context, writer.Add(tensor_name, tensor));
+        OP_REQUIRES_OK(context, writer.AddShm(tensor_name, tensor, shm_name));
       }
 
       if (VLOG_IS_ON(5)) {
@@ -154,12 +196,15 @@ class SaveV2 : public OpKernel {
                   << tensor.NumElements();
         }
       }
-
       VLOG(2) << "Done save of " << tensor_name;
     }
+    string data_path = DataFilename(prefix_string, 0, 1);
+    std::cout << "Nebula data_path: " << data_path << std::endl;
+
     OP_REQUIRES_OK(context, writer.Finish());
     VLOG(1) << "Done BundleWriter, prefix_string: " << prefix_string;
-
+    FILE *file = fopen(const_cast<char *>(data_path.c_str()), "w");
+    append_to_file_directly(shm_name, total_size, file);
     ResourceMgr* resource_manager = context->resource_manager();
     if (resource_manager != nullptr) {
       checkpoint::CheckpointCallbackManager* checkpoint_callback_manager;

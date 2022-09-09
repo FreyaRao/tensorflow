@@ -149,6 +149,13 @@ class BundleWriter {
 
   Status status() const { return status_; }
 
+  size_t CalculateTensorsSize(const Tensor& val);
+
+  int allocate(char* name, long size);
+
+  Status AddShm(StringPiece key, const Tensor& val, char* shm_name);
+
+  Status FlushShm(char* shm_name);
  private:
   Env* const env_;  // Not owned.
   const Options options_;
@@ -347,7 +354,8 @@ class FileOutputBuffer {
 
   // Buffered append.
   Status Append(StringPiece data);
-
+  // Shm Append.
+  Status MemcpyToShm(StringPiece data, char * shm_name);
   // Returns the running crc32c checksum of all currently appended bytes.
   uint32 crc32c() { return crc32c_; }
   // Clears the running crc32c checksum.
@@ -355,6 +363,7 @@ class FileOutputBuffer {
 
   // Appends the buffered data, then closes the underlying file.
   Status Close();
+  Status FlushBufferShm( char * shm_name);
 
  private:
   // Appends the buffered data to the underlying file. Does NOT flush the file.
@@ -365,11 +374,15 @@ class FileOutputBuffer {
   // buffer_ptr_[0, position_) holds the buffered data not yet appended to the
   // underlying file.
   size_t position_;
+  // record shm ptr.
+  size_t shm_position_;
   const size_t buffer_size_;
   char* buffer_ptr_;
 
   // Checksum of all appended bytes since construction or last clear_crc32c().
   uint32 crc32c_ = 0;
+
+
 };
 
 template <class T>
