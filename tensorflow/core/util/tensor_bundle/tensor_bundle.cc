@@ -1477,6 +1477,7 @@ Status FileOutputBuffer::MemcpyToShm(StringPiece data, char * shm_name) {
   size_t mem_size = region.get_size();
   // Copy the meta data from buffer to the shared memory.
   memcpy(mem_ref + shm_position_, data.data(), data.size());
+  crc32c_ = crc32c::Extend(crc32c_, mem_ref, data.size());
   shm_position_ += data.size();
   return OkStatus();
 }
@@ -1509,6 +1510,5 @@ Status FileOutputBuffer::FlushBufferShm(char * shm_name){
     TF_RETURN_IF_ERROR(file_->Append(mem_ref));
     return OkStatus();
 }
-
 
 }  // namespace tensorflow

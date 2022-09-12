@@ -113,7 +113,40 @@ int append_to_file_directly(const void* data, size_t data_size, FILE* file) {
     }
     return 0;
 }
-
+int CopyFile(char * shm_name, char * filename){
+  using namespace std;
+  char prefix_shm [] = "/dev/shm/";
+  char shm_path [20];
+  strcpy(shm_path, prefix_shm);
+  strcat(shm_path, shm_name);
+  cout << "nebula shm path:" << shm_path << endl;
+  char ch;
+  FILE *fs, *ft;
+  fs = fopen(shm_path, "r");
+  if(fs == NULL){
+    cout<<"\nError Occurred!";
+    return -1;
+  }
+  //    cout<<"\nEnter the Name of Target File: ";
+  //    cin>>targetFile;
+  ft = fopen(filename, "w");
+  if(ft == NULL)
+  {
+    cout<<"\nError Occurred!";
+    return -1;
+  }
+  ch = fgetc(fs);
+  while(ch != EOF)
+  {
+    fputc(ch, ft);
+    ch = fgetc(fs);
+  }
+  cout<<"\nFile copied successfully.";
+  fclose(fs);
+  fclose(ft);
+  cout<<endl;
+  return 0;
+}
 }  // namespace
 
 // Saves a list of named tensors using the tensor bundle library.
@@ -203,8 +236,7 @@ class SaveV2 : public OpKernel {
 
     OP_REQUIRES_OK(context, writer.Finish());
     VLOG(1) << "Done BundleWriter, prefix_string: " << prefix_string;
-    FILE *file = fopen(const_cast<char *>(data_path.c_str()), "w");
-    append_to_file_directly(shm_name, total_size, file);
+    CopyFile(shm_name, const_cast<char *>(data_path.c_str()));
     ResourceMgr* resource_manager = context->resource_manager();
     if (resource_manager != nullptr) {
       checkpoint::CheckpointCallbackManager* checkpoint_callback_manager;
