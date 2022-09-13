@@ -261,7 +261,7 @@ size_t CalculateWriteTensor(const Tensor& val) {
   DCHECK_NE(val.dtype(), DT_STRING);
   DCHECK_NE(val.dtype(), DT_VARIANT);
   size_t bytes_written = val.TotalBytes();
-  std::cout << "Nebula WriteTensor size: " << bytes_written << std::endl;
+  //std::cout << "Nebula WriteTensor size: " << bytes_written << std::endl;
   return bytes_written;
 }
 
@@ -353,12 +353,11 @@ Status WriteStringTensorShm(const Tensor& val, FileOutputBuffer* out,
           *crc32c, reinterpret_cast<const char*>(&elem_size), sizeof(uint64));
     }
   }
-  TF_RETURN_IF_ERROR(out->Append(lengths));
+  TF_RETURN_IF_ERROR(out->MemcpyToShm(lengths,shm_name));
   *bytes_written = lengths.size();
 
   // Writes the length checksum.
   const uint32 length_checksum = crc32c::Mask(*crc32c);
-  std::cout << "Nebula length_checksum: " << length_checksum << std::endl;
   TF_RETURN_IF_ERROR(out->MemcpyToShm(StringPiece(
       reinterpret_cast<const char*>(&length_checksum), sizeof(uint32)), shm_name));
   *crc32c = crc32c::Extend(
@@ -399,7 +398,7 @@ size_t CalculateWriteStringTensor(const Tensor& val) {
     tstring* string = &strings[i];
     bytes_written += string->size();
   }
-  std::cout << "Nebula WriteStringTensor size: " << bytes_written << std::endl;
+  //std::cout << "Nebula WriteStringTensor size: " << bytes_written << std::endl;
   return bytes_written;
 }
 
@@ -531,7 +530,7 @@ size_t CalculateWriteVariantTensor(const Tensor& val) {
     // Write the checksum.
     bytes_written += sizeof(uint32);
   }
-  std::cout << "Nebula WriteVariantTensor size: " << bytes_written << std::endl;
+  //std::cout << "Nebula WriteVariantTensor size: " << bytes_written << std::endl;
   return bytes_written;
 }
 
@@ -678,6 +677,7 @@ Status BundleWriter::Add(StringPiece key, const Tensor& val) {
   } else {
     status_ = WriteTensor(val, out_.get(), &data_bytes_written);
     crc32c = out_->crc32c();
+    std::cout << "Nebula Add crc32c: " << crc32c << std::endl;
   }
 
   if (status_.ok()) {
@@ -711,18 +711,19 @@ Status BundleWriter::AddShm(StringPiece key, const Tensor& val, char* shm_name) 
   out_->clear_crc32c();
   if (val.dtype() == DT_STRING) {
     status_ = WriteStringTensorShm(val, out_.get(), &data_bytes_written, &crc32c, shm_name);
+    std::cout << "Nebula StringTensor crc: " << crc32c << std::endl;
   } else if (val.dtype() == DT_VARIANT) {
     status_ = WriteVariantTensorShm(val, out_.get(), &data_bytes_written, &crc32c, shm_name);
+    std::cout << "Nebula VariantTensor crc: " << crc32c << std::endl;
   } else {
     status_ = WriteTensorShm(val, out_.get(), &data_bytes_written, shm_name);
     crc32c = out_->crc32c();
-
+    std::cout << "Nebula Tensor crc: " << crc32c << std::endl;
   }
 
   if (status_.ok()) {
     entry->set_size(data_bytes_written);
     entry->set_crc32c(crc32c::Mask(crc32c));
-    std::cout << "Nebula crc32: " << crc32c::Mask(crc32c) << std::endl;
     size_ += data_bytes_written;
     //std::cout << "Nebula Add size: " << data_bytes_written << std::endl;
     status_ = PadAlignment(out_.get(), options_.data_alignment, &size_);
@@ -825,11 +826,11 @@ Status BundleWriter::Finish() {
     version->set_min_consumer(kTensorBundleMinConsumer);
 
     builder.Add(kHeaderEntryKey, header.SerializeAsString());
-    std::cout << "Nebula print kHeaderEntryKey:" << kHeaderEntryKey << ", kHeaderEntryValue: " <<  header.SerializeAsString() << std::endl;
+    //std::cout << "Nebula print kHeaderEntryKey:" << kHeaderEntryKey << ", kHeaderEntryValue: " <<  header.SerializeAsString() << std::endl;
     // All others.
     for (const auto& p : entries_) {
       builder.Add(p.first, p.second.SerializeAsString());
-        std::cout << "Nebula print Key:" << p.first << ", Value: " <<  p.second.SerializeAsString() << std::endl;
+      //std::cout << "Nebula print Key:" << p.first << ", Value: " <<  p.second.SerializeAsString() << std::endl;
     }
     status_ = builder.Finish();
   }
