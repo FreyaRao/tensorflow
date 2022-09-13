@@ -233,7 +233,6 @@ class SaveV2 : public OpKernel {
     }
     string data_path = DataFilename(prefix_string, 0, 1);
     std::cout << "Nebula data_path: " << data_path << std::endl;
-
     OP_REQUIRES_OK(context, writer.Finish());
     VLOG(1) << "Done BundleWriter, prefix_string: " << prefix_string;
     CopyFile(shm_name, const_cast<char *>(data_path.c_str()));

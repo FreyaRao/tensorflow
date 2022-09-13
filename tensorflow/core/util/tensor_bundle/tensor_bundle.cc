@@ -122,8 +122,10 @@ Status ReadStringTensor(io::InputBuffer* buffered_file, size_t num_elements,
   TF_RETURN_IF_ERROR(buffered_file->ReadNBytes(
       sizeof(uint32), reinterpret_cast<char*>(&raw_length_checksum),
       &unused_bytes_read));
+  std::cout << "Nebula ReadStringtensor raw_length_checksum: " << raw_length_checksum << std::endl;
   length_checksum = need_to_swap_bytes ? BYTE_SWAP_32(raw_length_checksum)
                                        : raw_length_checksum;
+  std::cout << "Nebula ReadStringtensor Unmask length_checksum: " << crc32c::Unmask(length_checksum) << std::endl;
   if (crc32c::Unmask(length_checksum) != *actual_crc32c) {
     return errors::DataLoss(
         "The length checksum does not match: expected ",
@@ -356,6 +358,7 @@ Status WriteStringTensorShm(const Tensor& val, FileOutputBuffer* out,
 
   // Writes the length checksum.
   const uint32 length_checksum = crc32c::Mask(*crc32c);
+  std::cout << "Nebula length_checksum: " << length_checksum << std::endl;
   TF_RETURN_IF_ERROR(out->MemcpyToShm(StringPiece(
       reinterpret_cast<const char*>(&length_checksum), sizeof(uint32)), shm_name));
   *crc32c = crc32c::Extend(
@@ -601,6 +604,7 @@ BundleWriter::BundleWriter(Env* env, StringPiece prefix, const Options& options)
   data_path_ = DataFilename(prefix_, 0, 1);
   std::cout << "Nebula get filename: " << data_path_ << std::endl;
   metadata_path_ = MetaFilename(prefix_);
+  std::cout << "Nebula get metadata_path_: " << metadata_path_ << std::endl;
   if (use_temp_file_) {
     data_path_ = strings::StrCat(data_path_, ".tempstate", random::New64());
     metadata_path_ =
@@ -712,11 +716,13 @@ Status BundleWriter::AddShm(StringPiece key, const Tensor& val, char* shm_name) 
   } else {
     status_ = WriteTensorShm(val, out_.get(), &data_bytes_written, shm_name);
     crc32c = out_->crc32c();
+
   }
 
   if (status_.ok()) {
     entry->set_size(data_bytes_written);
     entry->set_crc32c(crc32c::Mask(crc32c));
+    std::cout << "Nebula crc32: " << crc32c::Mask(crc32c) << std::endl;
     size_ += data_bytes_written;
     //std::cout << "Nebula Add size: " << data_bytes_written << std::endl;
     status_ = PadAlignment(out_.get(), options_.data_alignment, &size_);
@@ -819,10 +825,11 @@ Status BundleWriter::Finish() {
     version->set_min_consumer(kTensorBundleMinConsumer);
 
     builder.Add(kHeaderEntryKey, header.SerializeAsString());
-
+    std::cout << "Nebula print kHeaderEntryKey:" << kHeaderEntryKey << ", kHeaderEntryValue: " <<  header.SerializeAsString() << std::endl;
     // All others.
     for (const auto& p : entries_) {
       builder.Add(p.first, p.second.SerializeAsString());
+        std::cout << "Nebula print Key:" << p.first << ", Value: " <<  p.second.SerializeAsString() << std::endl;
     }
     status_ = builder.Finish();
   }
@@ -1477,7 +1484,8 @@ Status FileOutputBuffer::MemcpyToShm(StringPiece data, char * shm_name) {
   size_t mem_size = region.get_size();
   // Copy the meta data from buffer to the shared memory.
   memcpy(mem_ref + shm_position_, data.data(), data.size());
-  crc32c_ = crc32c::Extend(crc32c_, mem_ref, data.size());
+  crc32c_ = crc32c::Extend(crc32c_, mem_ref + shm_position_, data.size());
+  std::cout << "nebula shm crc32" << crc32c_ << std::endl;
   shm_position_ += data.size();
   return OkStatus();
 }
