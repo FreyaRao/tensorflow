@@ -152,7 +152,7 @@ class BundleWriter {
   size_t CalculateTensorsSize(const Tensor& val);
 
   int allocate(char* name, long size);
-
+  char* hash_shm(const char *filename);
   Status AddShm(StringPiece key, const Tensor& val, char* shm_name);
 
   Status FlushShm(char* shm_name);

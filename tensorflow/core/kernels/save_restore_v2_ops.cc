@@ -34,7 +34,8 @@ limitations under the License.
 #include "tensorflow/core/util/saved_tensor_slice_util.h"
 #include "tensorflow/core/util/tensor_bundle/tensor_bundle.h"
 #include "tensorflow/core/util/tensor_slice_reader.h"
-
+#include "tensorflow/core/platform/hash.h"
+#include <stdlib.h>
 namespace tensorflow {
 
 namespace {
@@ -115,37 +116,43 @@ int append_to_file_directly(const void* data, size_t data_size, FILE* file) {
 }
 int CopyFile(char * shm_name, char * filename){
   using namespace std;
-  char prefix_shm [] = "/dev/shm/";
-  char shm_path [20];
-  strcpy(shm_path, prefix_shm);
-  strcat(shm_path, shm_name);
-  cout << "nebula shm path:" << shm_path << endl;
-  char ch;
-  FILE *fs, *ft;
-  fs = fopen(shm_path, "r");
-  if(fs == NULL){
-    cout<<"\nError Occurred!";
-    return -1;
-  }
-  //    cout<<"\nEnter the Name of Target File: ";
-  //    cin>>targetFile;
-  ft = fopen(filename, "w");
-  if(ft == NULL)
-  {
-    cout<<"\nError Occurred!";
-    return -1;
-  }
-  ch = fgetc(fs);
-  while(ch != EOF)
-  {
-    fputc(ch, ft);
-    ch = fgetc(fs);
-  }
-  cout<<"\nFile copied successfully.";
-  fclose(fs);
-  fclose(ft);
-  cout<<endl;
-  return 0;
+  const char * prefix_shm = "/dev/shm/";
+  std::string const& shm_path = std::string(prefix_shm) + std::string(shm_name);
+    cout << "nebula shm path:" << shm_path << endl;
+  const char * command_prefix = "cp";
+  std::string const& command = std::string(command_prefix) + " " + shm_path + " " + std::string(filename);
+  const char *c = command.c_str();
+  return system(c);
+//  char shm_path [20];
+//  strcpy(shm_path, prefix_shm);
+//  strcat(shm_path, shm_name);
+//  cout << "nebula shm path:" << shm_path << endl;
+//  char ch;
+//  FILE *fs, *ft;
+//  fs = fopen(shm_path, "r");
+//  if(fs == NULL){
+//    cout<<"\nError Occurred!";
+//    return -1;
+//  }
+//  //    cout<<"\nEnter the Name of Target File: ";
+//  //    cin>>targetFile;
+//  ft = fopen(filename, "w");
+//  if(ft == NULL)
+//  {
+//    cout<<"\nError Occurred!";
+//    return -1;
+//  }
+//  ch = fgetc(fs);
+//  while(ch != EOF)
+//  {
+//    fputc(ch, ft);
+//    ch = fgetc(fs);
+//  }
+//  cout<<"\nFile copied successfully.";
+//  fclose(fs);
+//  fclose(ft);
+//  cout<<endl;
+//  return 0;
 }
 }  // namespace
 
@@ -184,7 +191,10 @@ class SaveV2 : public OpKernel {
 
    }
     std::cout << "Nebula2 Tensor size: " << total_size << std::endl;
-    char* shm_name = random_string(10);
+    string data_path = DataFilename(prefix_string, 0, 1);
+    const char * filename_ =const_cast<char *>(data_path.c_str());
+    std::cout << "Nebula filename_: " << filename_ << std::endl;
+    char* shm_name = writer.hash_shm(filename_);
     std::cout << "Nebula shm name: " << shm_name << std::endl;
     writer.allocate(shm_name, total_size);
     for (int i = 0; i < num_tensors; ++i) {
@@ -231,10 +241,11 @@ class SaveV2 : public OpKernel {
       }
       VLOG(2) << "Done save of " << tensor_name;
     }
-    string data_path = DataFilename(prefix_string, 0, 1);
-    std::cout << "Nebula data_path: " << data_path << std::endl;
+    //string data_path = DataFilename(prefix_string, 0, 1);
+    //std::cout << "Nebula data_path: " << data_path << std::endl;
     OP_REQUIRES_OK(context, writer.Finish());
     VLOG(1) << "Done BundleWriter, prefix_string: " << prefix_string;
+    std::cout << "Nebula data_path: " << data_path << std::endl;
     CopyFile(shm_name, const_cast<char *>(data_path.c_str()));
     ResourceMgr* resource_manager = context->resource_manager();
     if (resource_manager != nullptr) {

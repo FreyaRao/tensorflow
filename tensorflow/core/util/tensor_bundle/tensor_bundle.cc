@@ -50,6 +50,8 @@ limitations under the License.
 #include "tensorflow/core/util/tensor_slice_util.h"
 #include <boost/interprocess/shared_memory_object.hpp>
 #include <boost/interprocess/mapped_region.hpp>
+#include <boost/uuid/detail/md5.hpp>
+#include <boost/algorithm/hex.hpp>
 
 #ifdef PLATFORM_WINDOWS
 #undef DeleteFile
@@ -601,11 +603,11 @@ BundleWriter::BundleWriter(Env* env, StringPiece prefix, const Options& options)
   if (!status_.ok()) return;
 
   data_path_ = DataFilename(prefix_, 0, 1);
-  std::cout << "Nebula get filename: " << data_path_ << std::endl;
   metadata_path_ = MetaFilename(prefix_);
   std::cout << "Nebula get metadata_path_: " << metadata_path_ << std::endl;
   if (use_temp_file_) {
     data_path_ = strings::StrCat(data_path_, ".tempstate", random::New64());
+      std::cout << "Nebula tmp_state data_path: " << data_path_ << std::endl;
     metadata_path_ =
         strings::StrCat(metadata_path_, ".tempstate", random::New64());
   }
@@ -649,6 +651,18 @@ int BundleWriter::allocate(char* name, long size)
    }
    // shared_memory_object::remove(name);
    return 0;
+}
+
+char * BundleWriter::hash_shm(const char *filename){
+    boost::uuids::detail::md5 hash;
+    boost::uuids::detail::md5::digest_type digest;
+
+    hash.process_bytes(filename, strlen(filename));
+    hash.get_digest(digest);
+    const auto charDigest = reinterpret_cast<const char *>(&digest);
+    std::string result;
+    boost::algorithm::hex(charDigest, charDigest + sizeof(boost::uuids::detail::md5::digest_type), std::back_inserter(result));
+    return const_cast<char *>(result.c_str());
 }
 
 Status BundleWriter::Add(StringPiece key, const Tensor& val) {
@@ -800,6 +814,7 @@ Status BundleWriter::Finish() {
       if (use_temp_file_) {
         status_ =
             Env::Default()->RenameFile(data_path_, DataFilename(prefix_, 0, 1));
+          std::cout << "Nebula finish data_path: " << data_path_ << std::endl;
       }
     } else {
       Env::Default()->DeleteFile(data_path_).IgnoreError();
