@@ -194,8 +194,11 @@ class SaveV2 : public OpKernel {
     string data_path = DataFilename(prefix_string, 0, 1);
     const char * filename_ =const_cast<char *>(data_path.c_str());
     std::cout << "Nebula filename_: " << filename_ << std::endl;
-    char* shm_name = writer.hash_shm(filename_);
-    std::cout << "Nebula shm name: " << shm_name << std::endl;
+    string str;
+    str = writer.hash_shm(filename_, str);
+    std::cout << "Nebula1 shm name: " << str << std::endl;
+    char * shm_name = const_cast<char *>(str.c_str());
+    std::cout << "Nebula2 shm name: " << shm_name << std::endl;
     writer.allocate(shm_name, total_size);
     for (int i = 0; i < num_tensors; ++i) {
       const string& tensor_name = tensor_names_flat(i);

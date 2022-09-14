@@ -653,16 +653,16 @@ int BundleWriter::allocate(char* name, long size)
    return 0;
 }
 
-char * BundleWriter::hash_shm(const char *filename){
-    boost::uuids::detail::md5 hash;
-    boost::uuids::detail::md5::digest_type digest;
+std::string BundleWriter::hash_shm(const char *filename, std::string result){
+  boost::uuids::detail::md5 hash;
+  boost::uuids::detail::md5::digest_type digest;
 
-    hash.process_bytes(filename, strlen(filename));
-    hash.get_digest(digest);
-    const auto charDigest = reinterpret_cast<const char *>(&digest);
-    std::string result;
-    boost::algorithm::hex(charDigest, charDigest + sizeof(boost::uuids::detail::md5::digest_type), std::back_inserter(result));
-    return const_cast<char *>(result.c_str());
+  hash.process_bytes(filename, strlen(filename));
+  hash.get_digest(digest);
+  const auto charDigest = reinterpret_cast<const char *>(&digest);
+  boost::algorithm::hex(charDigest, charDigest + sizeof(boost::uuids::detail::md5::digest_type), std::back_inserter(result));
+  std::cout << result << std::endl;
+  return result;
 }
 
 Status BundleWriter::Add(StringPiece key, const Tensor& val) {
