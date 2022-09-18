@@ -52,7 +52,7 @@ limitations under the License.
 #include <boost/interprocess/mapped_region.hpp>
 #include <boost/uuid/detail/md5.hpp>
 #include <boost/algorithm/hex.hpp>
-
+#include <time.h>
 #ifdef PLATFORM_WINDOWS
 #undef DeleteFile
 #endif
@@ -255,6 +255,8 @@ Status WriteTensorShm(const Tensor& val, FileOutputBuffer* out,
   *bytes_written = val.TotalBytes();
   char* buf = GetBackingBuffer(val);
   VLOG(1) << "Appending " << *bytes_written << " bytes to file";
+  clock_t start, end;
+  std::cout << "Nebula Tensor size: " << *bytes_written << std::endl;
   return out->MemcpyToShm(StringPiece(buf, *bytes_written), shm_name);
 }
 
@@ -263,7 +265,7 @@ size_t CalculateWriteTensor(const Tensor& val) {
   DCHECK_NE(val.dtype(), DT_STRING);
   DCHECK_NE(val.dtype(), DT_VARIANT);
   size_t bytes_written = val.TotalBytes();
-  //std::cout << "Nebula WriteTensor size: " << bytes_written << std::endl;
+  //std::cout << "Nebula Tensor size: " << bytes_written << std::endl;
   return bytes_written;
 }
 
@@ -373,6 +375,7 @@ Status WriteStringTensorShm(const Tensor& val, FileOutputBuffer* out,
     *bytes_written += string->size();
     *crc32c = crc32c::Extend(*crc32c, string->data(), string->size());
   }
+  std::cout << "Nebula StringTensor size: " << *bytes_written << std::endl;
   return OkStatus();
 }
 //Calculate WriteStringTensor data size
@@ -400,7 +403,7 @@ size_t CalculateWriteStringTensor(const Tensor& val) {
     tstring* string = &strings[i];
     bytes_written += string->size();
   }
-  //std::cout << "Nebula WriteStringTensor size: " << bytes_written << std::endl;
+  //std::cout << "Nebula StringTensor size: " << bytes_written << std::endl;
   return bytes_written;
 }
 
@@ -503,6 +506,7 @@ Status WriteVariantTensorShm(const Tensor& val, FileOutputBuffer* out,
                        sizeof(uint32));
     *bytes_written += sizeof(uint32);
   }
+  std::cout << "Nebula VariantTensor size: " << *bytes_written << std::endl;
   return OkStatus();
 }
 //Calculate WriteVariantTensor data size
@@ -532,7 +536,7 @@ size_t CalculateWriteVariantTensor(const Tensor& val) {
     // Write the checksum.
     bytes_written += sizeof(uint32);
   }
-  //std::cout << "Nebula WriteVariantTensor size: " << bytes_written << std::endl;
+  //std::cout << "Nebula VariantTensor size: " << bytes_written << std::endl;
   return bytes_written;
 }
 
@@ -604,10 +608,10 @@ BundleWriter::BundleWriter(Env* env, StringPiece prefix, const Options& options)
 
   data_path_ = DataFilename(prefix_, 0, 1);
   metadata_path_ = MetaFilename(prefix_);
-  std::cout << "Nebula get metadata_path_: " << metadata_path_ << std::endl;
+  //std::cout << "Nebula get metadata_path_: " << metadata_path_ << std::endl;
   if (use_temp_file_) {
     data_path_ = strings::StrCat(data_path_, ".tempstate", random::New64());
-      std::cout << "Nebula tmp_state data_path: " << data_path_ << std::endl;
+    //std::cout << "Nebula tmp_state data_path: " << data_path_ << std::endl;
     metadata_path_ =
         strings::StrCat(metadata_path_, ".tempstate", random::New64());
   }
@@ -642,7 +646,7 @@ int BundleWriter::allocate(char* name, long size)
 
       //Map the whole shared memory in this process
       mapped_region region(shm, read_write);
-      std::cout << region.get_size() << std::endl;
+      //std::cout << region.get_size() << std::endl;
    }
    catch(interprocess_exception &ex){
       shared_memory_object::remove(name);
@@ -661,7 +665,7 @@ std::string BundleWriter::hash_shm(const char *filename, std::string result){
   hash.get_digest(digest);
   const auto charDigest = reinterpret_cast<const char *>(&digest);
   boost::algorithm::hex(charDigest, charDigest + sizeof(boost::uuids::detail::md5::digest_type), std::back_inserter(result));
-  std::cout << result << std::endl;
+  //std::cout << result << std::endl;
   return result;
 }
 
@@ -691,7 +695,7 @@ Status BundleWriter::Add(StringPiece key, const Tensor& val) {
   } else {
     status_ = WriteTensor(val, out_.get(), &data_bytes_written);
     crc32c = out_->crc32c();
-    std::cout << "Nebula Add crc32c: " << crc32c << std::endl;
+    //std::cout << "Nebula Add crc32c: " << crc32c << std::endl;
   }
 
   if (status_.ok()) {
@@ -724,15 +728,18 @@ Status BundleWriter::AddShm(StringPiece key, const Tensor& val, char* shm_name) 
   uint32 crc32c = 0;
   out_->clear_crc32c();
   if (val.dtype() == DT_STRING) {
+      std::cout << "Nebula Tensor type:  StringTensor.  ";
     status_ = WriteStringTensorShm(val, out_.get(), &data_bytes_written, &crc32c, shm_name);
-    std::cout << "Nebula StringTensor crc: " << crc32c << std::endl;
+    //std::cout << "Nebula StringTensor crc: " << crc32c << std::endl;
   } else if (val.dtype() == DT_VARIANT) {
+      std::cout << "Nebula Tensor type:  VariantTensor.  ";
     status_ = WriteVariantTensorShm(val, out_.get(), &data_bytes_written, &crc32c, shm_name);
-    std::cout << "Nebula VariantTensor crc: " << crc32c << std::endl;
+    //std::cout << "Nebula VariantTensor crc: " << crc32c << std::endl;
   } else {
+      std::cout << "Nebula Tensor type:  Tensor.  ";
     status_ = WriteTensorShm(val, out_.get(), &data_bytes_written, shm_name);
     crc32c = out_->crc32c();
-    std::cout << "Nebula Tensor crc: " << crc32c << std::endl;
+    //std::cout << "Nebula Tensor crc: " << crc32c << std::endl;
   }
 
   if (status_.ok()) {
@@ -814,7 +821,7 @@ Status BundleWriter::Finish() {
       if (use_temp_file_) {
         status_ =
             Env::Default()->RenameFile(data_path_, DataFilename(prefix_, 0, 1));
-          std::cout << "Nebula finish data_path: " << data_path_ << std::endl;
+          //std::cout << "Nebula finish data_path: " << data_path_ << std::endl;
       }
     } else {
       Env::Default()->DeleteFile(data_path_).IgnoreError();
@@ -991,6 +998,7 @@ Status MergeBundles(Env* env, gtl::ArraySlice<tstring> prefixes,
   if (!status.ok() && !errors::IsAlreadyExists(status)) return status;
   bool atleast_one_file_exists = false;
   for (auto& prefix : prefixes) {
+      //std::cout << "nebula1 prefix size: " << static_cast<int>(prefix.size()) << " prefix data: " << prefix.data() << std::endl;
     if (!env->FileExists(MetaFilename(prefix)).ok()) {
       if (allow_missing_files) continue;
       return errors::InvalidArgument(
@@ -1006,8 +1014,10 @@ Status MergeBundles(Env* env, gtl::ArraySlice<tstring> prefixes,
   }
   // Renames data files to contain the merged bundle prefix.
   for (const auto& p : merge.shard_ids) {
+      //std::cout << "nebula2 prefix size: " << static_cast<int>(merged_prefix.size()) << " prefix data: " << merged_prefix.data() << std::endl;
     VLOG(1) << "Renaming " << p.first << " to "
             << DataFilename(merged_prefix, p.second, merge.shard_ids.size());
+     // std::cout << "nebula3 file name: " << DataFilename(merged_prefix, p.second, merge.shard_ids.size())  << std::endl;
     TF_RETURN_IF_ERROR(env->RenameFile(
         p.first,
         DataFilename(merged_prefix, p.second, merge.shard_ids.size())));
@@ -1499,9 +1509,13 @@ Status FileOutputBuffer::MemcpyToShm(StringPiece data, char * shm_name) {
   char *mem_ref = static_cast<char*>(region.get_address());
   size_t mem_size = region.get_size();
   // Copy the meta data from buffer to the shared memory.
+  clock_t start, end;
+  start = clock();
   memcpy(mem_ref + shm_position_, data.data(), data.size());
+  end = clock();
+  std::cout<<"Memcpy time = "<<double(end-start)/CLOCKS_PER_SEC<<"s" << std::endl;
   crc32c_ = crc32c::Extend(crc32c_, mem_ref + shm_position_, data.size());
-  std::cout << "nebula shm crc32" << crc32c_ << std::endl;
+  //std::cout << "nebula shm crc32" << crc32c_ << std::endl;
   shm_position_ += data.size();
   return OkStatus();
 }

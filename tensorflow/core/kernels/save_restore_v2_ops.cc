@@ -36,6 +36,7 @@ limitations under the License.
 #include "tensorflow/core/util/tensor_slice_reader.h"
 #include "tensorflow/core/platform/hash.h"
 #include <stdlib.h>
+#include <time.h>
 namespace tensorflow {
 
 namespace {
@@ -104,55 +105,14 @@ char*  random_string(std::size_t length)
     return const_cast<char *>(random_string.c_str());
 }
 
-int append_to_file_directly(const void* data, size_t data_size, FILE* file) {
-    if (data_size > 0) {
-        size_t ret = fwrite(data,  1, data_size,  file);
-        if (ret != data_size) {
-            std::cout << "Fail to fwrite to file: " << ferror(file) << std::endl;
-            return -1;
-        }
-    }
-    return 0;
-}
 int CopyFile(char * shm_name, char * filename){
   using namespace std;
   const char * prefix_shm = "/dev/shm/";
   std::string const& shm_path = std::string(prefix_shm) + std::string(shm_name);
-    cout << "nebula shm path:" << shm_path << endl;
   const char * command_prefix = "cp";
   std::string const& command = std::string(command_prefix) + " " + shm_path + " " + std::string(filename);
   const char *c = command.c_str();
   return system(c);
-//  char shm_path [20];
-//  strcpy(shm_path, prefix_shm);
-//  strcat(shm_path, shm_name);
-//  cout << "nebula shm path:" << shm_path << endl;
-//  char ch;
-//  FILE *fs, *ft;
-//  fs = fopen(shm_path, "r");
-//  if(fs == NULL){
-//    cout<<"\nError Occurred!";
-//    return -1;
-//  }
-//  //    cout<<"\nEnter the Name of Target File: ";
-//  //    cin>>targetFile;
-//  ft = fopen(filename, "w");
-//  if(ft == NULL)
-//  {
-//    cout<<"\nError Occurred!";
-//    return -1;
-//  }
-//  ch = fgetc(fs);
-//  while(ch != EOF)
-//  {
-//    fputc(ch, ft);
-//    ch = fgetc(fs);
-//  }
-//  cout<<"\nFile copied successfully.";
-//  fclose(fs);
-//  fclose(ft);
-//  cout<<endl;
-//  return 0;
 }
 }  // namespace
 
@@ -162,6 +122,8 @@ class SaveV2 : public OpKernel {
   explicit SaveV2(OpKernelConstruction* context) : OpKernel(context) {}
 
   void Compute(OpKernelContext* context) override {
+      clock_t start_0, start_1, end;
+      start_0 = clock();
     const Tensor& prefix = context->input(0);
     const Tensor& tensor_names = context->input(1);
     const Tensor& shape_and_slices = context->input(2);
@@ -176,7 +138,7 @@ class SaveV2 : public OpKernel {
     const auto& shape_and_slices_flat = shape_and_slices.flat<tstring>();
 
     BundleWriter writer(Env::Default(), prefix_string);
-    std::cout << "Nebula prefix_string : " << prefix_string << std::endl;
+    //std::cout << "Nebula prefix_string : " << prefix_string << std::endl;
     OP_REQUIRES_OK(context, writer.status());
     VLOG(1) << "BundleWriter, prefix_string: " << prefix_string;
     size_t total_size = 0;
@@ -185,21 +147,20 @@ class SaveV2 : public OpKernel {
         const Tensor& atensor = context->input(i + kFixedInputs);
         total_size += writer.CalculateTensorsSize(atensor);
      if (!shape_and_slices_flat(i).empty()) {
-        std::cout << "Nebula1 Tensor size: " << total_size << std::endl;
+        //std::cout << "Nebula1 Tensor size: " << total_size << std::endl;
        total_size += writer.CalculateTensorsSize(atensor);
      }
 
    }
-    std::cout << "Nebula2 Tensor size: " << total_size << std::endl;
+    //std::cout << "Nebula2 Tensor size: " << total_size << std::endl;
     string data_path = DataFilename(prefix_string, 0, 1);
     const char * filename_ =const_cast<char *>(data_path.c_str());
-    std::cout << "Nebula filename_: " << filename_ << std::endl;
+    //std::cout << "Nebula filename_: " << filename_ << std::endl;
     string str;
     str = writer.hash_shm(filename_, str);
-    std::cout << "Nebula1 shm name: " << str << std::endl;
     char * shm_name = const_cast<char *>(str.c_str());
-    std::cout << "Nebula2 shm name: " << shm_name << std::endl;
     writer.allocate(shm_name, total_size);
+    start_1 = clock();
     for (int i = 0; i < num_tensors; ++i) {
       const string& tensor_name = tensor_names_flat(i);
       const Tensor& tensor = context->input(i + kFixedInputs);
@@ -244,11 +205,15 @@ class SaveV2 : public OpKernel {
       }
       VLOG(2) << "Done save of " << tensor_name;
     }
+    end = clock();
+    std::cout<<"copy to shm time = "<<double(end-start_1)/CLOCKS_PER_SEC<<"s"<<std::endl;
     //string data_path = DataFilename(prefix_string, 0, 1);
     //std::cout << "Nebula data_path: " << data_path << std::endl;
     OP_REQUIRES_OK(context, writer.Finish());
     VLOG(1) << "Done BundleWriter, prefix_string: " << prefix_string;
-    std::cout << "Nebula data_path: " << data_path << std::endl;
+    //std::cout << "Nebula data_path: " << data_path << std::endl;
+      end = clock();
+      std::cout<<"time = "<<double(end-start_0)/CLOCKS_PER_SEC<<"s"<<std::endl;
     CopyFile(shm_name, const_cast<char *>(data_path.c_str()));
     ResourceMgr* resource_manager = context->resource_manager();
     if (resource_manager != nullptr) {
