@@ -36,10 +36,11 @@ class CheckpointOptions(object):
   """
 
   # Define object attributes in __slots__ for improved memory and performance.
-  __slots__ = ("experimental_io_device", "experimental_enable_async_checkpoint")
+  __slots__ = ("experimental_io_device", "experimental_enable_async_checkpoint", "enable_nebula")
 
   def __init__(self, experimental_io_device=None,
-               experimental_enable_async_checkpoint=False):
+               experimental_enable_async_checkpoint=False,
+               enable_nebula=False):
     """Creates an object that stores options for a Checkpoint.
 
     Args:
@@ -64,3 +65,4 @@ class CheckpointOptions(object):
     """
     self.experimental_io_device = experimental_io_device
     self.experimental_enable_async_checkpoint = experimental_enable_async_checkpoint
+    self.enable_nebula = enable_nebula

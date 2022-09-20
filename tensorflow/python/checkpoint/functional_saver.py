@@ -78,8 +78,9 @@ class _SingleDeviceSaver(object):
           slice_specs.append(slice_spec)
     save_device = options.experimental_io_device or "cpu:0"
     with ops.device(save_device):
+      if options.enable_nebula:
+        return io_ops.save_nebula(file_prefix, tensor_names, slice_specs, tensors)
       return io_ops.save_v2(file_prefix, tensor_names, slice_specs, tensors)
-
   def restore(self, file_prefix, options=None):
     """Restore the saveable objects from a checkpoint with `file_prefix`.
 

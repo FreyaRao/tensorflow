@@ -83,6 +83,32 @@ REGISTER_OP("SaveV2")
       return OkStatus();
     });
 
+REGISTER_OP("SaveNebula")
+.Input("prefix: string")
+.Input("tensor_names: string")
+.Input("shape_and_slices: string")
+.Input("tensors: dtypes")
+.Attr("dtypes: list(type)")
+.SetIsStateful()
+.SetShapeFn([](InferenceContext* c) {
+ShapeHandle unused;
+ShapeHandle s;
+DimensionHandle unused_dim;
+
+// Validate prefix.
+TF_RETURN_IF_ERROR(c->WithRank(c->input(0), 0, &unused));
+
+// Validate tensor_names and shapes_and_slices.
+for (int i = 1; i <= 2; ++i) {
+TF_RETURN_IF_ERROR(c->WithRank(c->input(i), 1, &s));
+TF_RETURN_IF_ERROR(
+        c->WithValue(c->Dim(s, 0), c->num_inputs() - 3, &unused_dim));
+}
+// TODO(mrry): Attempt to parse the shapes_and_slices values and use
+// them to constrain the shape of the remaining inputs.
+return OkStatus();
+});
+
 REGISTER_OP("RestoreV2")
     .Input("prefix: string")
     .Input("tensor_names: string")
