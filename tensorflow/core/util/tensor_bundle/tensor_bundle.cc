@@ -647,7 +647,7 @@ std::string BundleWriter::md5_shm(const char * filename, std::string hex_){
         hex_ += map[digest[i] % 16];
     }
     std::cout << "hex:   "<<hex_ << std::endl;
-    return const_cast<char *>(hex_.c_str());
+    return hex_;
 }
 
 Status BundleWriter::Add(StringPiece key, const Tensor& val) {
