@@ -3184,6 +3184,7 @@ cc_library(
         ":reader_ops",
         ":restore_op",
         ":save_op",
+	":save_nebula_ops",
         ":save_restore_v2_ops",
         ":text_line_reader_op",
         ":tf_record_reader_op",
@@ -3252,6 +3253,12 @@ tf_kernel_library(
 tf_kernel_library(
     name = "save_op",
     prefix = "save_op",
+    deps = SAVE_RESTORE_DEPS,
+)
+
+tf_kernel_library(
+    name = "save_nebula_ops",
+    prefix = "save_nebula_ops",
     deps = SAVE_RESTORE_DEPS,
 )
 

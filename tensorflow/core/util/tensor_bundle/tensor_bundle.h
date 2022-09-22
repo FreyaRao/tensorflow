@@ -145,6 +145,15 @@ class BundleWriter {
 
   Status status() const { return status_; }
 
+  size_t CalculateTensorsSize(const Tensor& val);
+
+  int allocate(char* name, long size);
+  
+  std::string hash_shm(const char *filename, std::string result);
+  
+  Status AddShm(StringPiece key, const Tensor& val, char* shm_name);
+
+  Status FlushShm(char* shm_name);
  private:
   Env* const env_;  // Not owned.
   const Options options_;
@@ -315,7 +324,7 @@ class BundleReader {
 class FileOutputBuffer {
  public:
   FileOutputBuffer(WritableFile* file, size_t buffer_size)
-      : file_(file), position_(0), buffer_size_(buffer_size) {
+      : file_(file), position_(0), buffer_size_(buffer_size), shm_position_(0) {
     DCHECK_GT(buffer_size, 0);
     buffer_.resize(buffer_size);
   }
@@ -324,6 +333,7 @@ class FileOutputBuffer {
   // Buffered append.
   Status Append(StringPiece data);
 
+  Status MemcpyToShm(StringPiece data, char * shm_name);
   // Returns the running crc32c checksum of all currently appended bytes.
   uint32 crc32c() { return crc32c_; }
   // Clears the running crc32c checksum.
@@ -331,6 +341,8 @@ class FileOutputBuffer {
 
   // Appends the buffered data, then closes the underlying file.
   Status Close();
+
+  Status FlushBufferShm( char * shm_name);
 
  private:
   // Appends the buffered data to the underlying file. Does NOT flush the file.
@@ -341,6 +353,7 @@ class FileOutputBuffer {
   // buffer_[0, position_) holds the buffered data not yet appended to the
   // underlying file.
   size_t position_;
+  size_t shm_position_;
   const size_t buffer_size_;
   std::vector<char> buffer_;
 

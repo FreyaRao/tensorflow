@@ -42,7 +42,7 @@ cc_library(
         "byte_swap.h",
         "tensor_bundle.h",
     ],
-    copts = tf_copts() + if_not_windows(["-Wno-sign-compare"]),
+    copts = tf_copts() + ["-fexceptions"] + if_not_windows(["-Wno-sign-compare"]),
     deps = [
         ":naming",
         "//tensorflow/core:core_cpu_lib",
