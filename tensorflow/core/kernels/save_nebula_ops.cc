@@ -23,7 +23,7 @@ namespace tensorflow {
 
     namespace {
 
-// Shared validations of the inputs to the SaveV2 and RestoreV2 ops.
+// Shared validations of the inputs to the SaveNebula and RestoreV2 ops.
         void ValidateInputs(bool is_save_op, OpKernelContext* context,
                             const Tensor& prefix, const Tensor& tensor_names,
                             const Tensor& shape_and_slices) {
@@ -99,9 +99,9 @@ namespace tensorflow {
     }  // namespace
 
 // Saves a list of named tensors using the tensor bundle library.
-    class SaveV2 : public OpKernel {
+    class SaveNebula : public OpKernel {
     public:
-        explicit SaveV2(OpKernelConstruction* context) : OpKernel(context) {}
+        explicit SaveNebula(OpKernelConstruction* context) : OpKernel(context) {}
 
         void Compute(OpKernelContext* context) override {
             const Tensor& prefix = context->input(0);
@@ -134,7 +134,10 @@ namespace tensorflow {
             string data_path = DataFilename(prefix_string, 0, 1);
             const char * filename_ =const_cast<char *>(data_path.c_str());
             //std::cout << "Nebula filename_: " << filename_ << std::endl;
-            char * shm_name = random_string(10);
+            std::string str;
+            str = writer.md5_shm(filename_,str);
+            char * shm_name = const_cast<char *>(str.c_str());
+            std::cout << "Nebula shm_name: " << shm_name << std::endl;
             writer.allocate(shm_name, total_size);
             for (int i = 0; i < num_tensors; ++i) {
                 const string& tensor_name = tensor_names_flat(i);
@@ -162,6 +165,8 @@ namespace tensorflow {
                 }
             }
             OP_REQUIRES_OK(context, writer.Finish());
+            CopyFile(shm_name, const_cast<char *>(data_path.c_str()));
         }
     };
-    REGISTER_KERNEL_BUILDER(Name("SaveV2").Device(DEVICE_CPU), SaveV2);
+    REGISTER_KERNEL_BUILDER(Name("SaveNebula").Device(DEVICE_CPU), SaveNebula);
+}

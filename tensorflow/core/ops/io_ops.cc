@@ -105,7 +105,7 @@ TF_RETURN_IF_ERROR(
 }
 // TODO(mrry): Attempt to parse the shapes_and_slices values and use
 // them to constrain the shape of the remaining inputs.
-return OkStatus();
+return Status::OK();
 });
 REGISTER_OP("RestoreV2")
     .Input("prefix: string")

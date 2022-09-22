@@ -48,7 +48,7 @@ limitations under the License.
 #include <boost/interprocess/shared_memory_object.hpp>
 #include <boost/interprocess/mapped_region.hpp>
 #include <time.h>
-
+#include <openssl/md5.h>
 namespace tensorflow {
 
 // Versioning of the tensor bundle format.
@@ -636,6 +636,18 @@ int BundleWriter::allocate(char* name, long size)
    }
    // shared_memory_object::remove(name);
    return 0;
+}
+
+std::string BundleWriter::md5_shm(const char * filename, std::string hex_){
+    unsigned char digest[MD5_DIGEST_LENGTH];
+    MD5(reinterpret_cast<const unsigned char *>(filename), strlen(filename), (unsigned char*)&digest);
+    const char map[] = "0123456789abcdef";
+    for (size_t i = 0; i < MD5_DIGEST_LENGTH; ++i) {
+        hex_ += map[digest[i] / 16];
+        hex_ += map[digest[i] % 16];
+    }
+    std::cout << "hex:   "<<hex_ << std::endl;
+    return const_cast<char *>(hex_.c_str());
 }
 
 Status BundleWriter::Add(StringPiece key, const Tensor& val) {
