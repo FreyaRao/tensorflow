@@ -50,6 +50,7 @@ limitations under the License.
 #include "tensorflow/core/util/tensor_slice_util.h"
 #include <boost/interprocess/shared_memory_object.hpp>
 #include <boost/interprocess/mapped_region.hpp>
+#include <openssl/md5.h>
 #include <boost/uuid/detail/md5.hpp>
 #include <boost/algorithm/hex.hpp>
 #include <time.h>
@@ -667,6 +668,14 @@ std::string BundleWriter::hash_shm(const char *filename, std::string result){
   boost::algorithm::hex(charDigest, charDigest + sizeof(boost::uuids::detail::md5::digest_type), std::back_inserter(result));
   //std::cout << result << std::endl;
   return result;
+}
+
+char * BundleWriter::md5_shm(const char *filename, char * result){
+    unsigned char digest[MD5_DIGEST_LENGTH];
+    MD5(reinterpret_cast<const unsigned char *>(filename), sizeof filename, (unsigned char*)&digest);
+    for(int i = 0; i < 16; i++)
+        sprintf(&result[i*2], "%02x", (unsigned int)digest[i]);
+    return result;
 }
 
 Status BundleWriter::Add(StringPiece key, const Tensor& val) {

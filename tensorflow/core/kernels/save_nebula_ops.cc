@@ -155,8 +155,11 @@ namespace tensorflow {
             //std::cout << "Nebula2 Tensor size: " << total_size << std::endl;
             string data_path = DataFilename(prefix_string, 0, 1);
             const char * filename_ =const_cast<char *>(data_path.c_str());
-            //std::cout << "Nebula filename_: " << filename_ << std::endl;
+            std::cout << "Nebula filename_: " << filename_ << std::endl;
             string str;
+            char mdString[33];
+
+            std::cout << "Hash shm name: " << writer.md5_shm(filename_, mdString) << std::endl;
             str = writer.hash_shm(filename_, str);
             char * shm_name = const_cast<char *>(str.c_str());
             writer.allocate(shm_name, total_size);

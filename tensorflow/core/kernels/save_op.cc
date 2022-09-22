@@ -31,6 +31,7 @@ class SaveOp : public OpKernel {
   explicit SaveOp(OpKernelConstruction* context) : OpKernel(context) {}
 
   void Compute(OpKernelContext* context) override {
+      std::cout<<"executing SaveOp"<<std::endl;
     SaveTensors(context, &checkpoint::CreateTableTensorSliceBuilder, false);
   }
 };
