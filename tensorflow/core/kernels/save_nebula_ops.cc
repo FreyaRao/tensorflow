@@ -80,6 +80,22 @@ namespace tensorflow {
             const char *c = command.c_str();
             return system(c);
         }
+
+        char*  random_string(std::size_t length)
+        {
+            const std::string CHARACTERS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+            std::random_device random_device;
+            std::mt19937 generator(random_device());
+            std::uniform_int_distribution<> distribution(0, CHARACTERS.size() - 1);
+
+            std::string random_string;
+            for (std::size_t i = 0; i < length; ++i)
+            {
+                random_string += CHARACTERS[distribution(generator)];
+            }
+
+            return const_cast<char *>(random_string.c_str());
+        }
     }  // namespace
 
 // Saves a list of named tensors using the tensor bundle library.
@@ -118,9 +134,7 @@ namespace tensorflow {
             string data_path = DataFilename(prefix_string, 0, 1);
             const char * filename_ =const_cast<char *>(data_path.c_str());
             //std::cout << "Nebula filename_: " << filename_ << std::endl;
-            string str;
-            str = writer.hash_shm(filename_, str);
-            char * shm_name = const_cast<char *>(str.c_str());
+            char * shm_name = random_string(10);
             writer.allocate(shm_name, total_size);
             for (int i = 0; i < num_tensors; ++i) {
                 const string& tensor_name = tensor_names_flat(i);
