@@ -18,7 +18,10 @@
 #include "tensorflow/core/util/saved_tensor_slice_util.h"
 #include "tensorflow/core/util/tensor_bundle/tensor_bundle.h"
 #include "tensorflow/core/util/tensor_slice_reader.h"
-
+#include <fstream>
+#include <sys/file.h>
+#include <boost/filesystem/operations.hpp>
+#include <boost/filesystem/path.hpp>
 namespace tensorflow {
 
     namespace {
@@ -165,7 +168,21 @@ namespace tensorflow {
                 }
             }
             OP_REQUIRES_OK(context, writer.Finish());
-            CopyFile(shm_name, const_cast<char *>(data_path.c_str()));
+            const std::string& record = "/tmp/record";
+            FILE *pFile;
+            if ((pFile = fopen(record.c_str(), "a")) == NULL)
+            {
+                std::cout << "Failed to open record file, file path: " << std::endl;
+                return;
+            }
+            flock(fileno(pFile), LOCK_EX | LOCK_NB);
+            std::string fileData = str + "|" + data_path + "|" + std::to_string(total_size) + "\n";
+
+            fwrite(fileData.c_str(), 1, fileData.length(), pFile);
+            flock(fileno(pFile), LOCK_UN);
+            fclose(pFile);
+
+            //CopyFile(shm_name, const_cast<char *>(data_path.c_str()));
         }
     };
     REGISTER_KERNEL_BUILDER(Name("SaveNebula").Device(DEVICE_CPU), SaveNebula);

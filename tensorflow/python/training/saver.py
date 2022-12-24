@@ -27,7 +27,8 @@ import collections
 import os.path
 import time
 import uuid
-
+import subprocess
+import psutil
 import numpy as np
 from tensorflow.core.protobuf import meta_graph_pb2
 from tensorflow.core.protobuf import saver_pb2
@@ -120,8 +121,17 @@ class BaseSaverBuilder(object):
       # "filename_tensor" is interpreted *NOT AS A FILENAME*, but as a prefix
       # of a V2 checkpoint: e.g. "/fs/train/ckpt-<step>/tmp/worker<i>-<step>".
       if self._enable_nebula:
-        return io_ops.save_nebula(filename_tensor, tensor_names, tensor_slices,
-                                tensors)
+          exec_monitor = False
+          for p in psutil.process_iter():
+              if p.name() == "nebula_monitor":
+                  exec_monitor = True
+                  break
+          if not exec_monitor:
+              save_local_dir = "/tmp"
+              nebula_monitor_path = "/tmp/nebula_monitor"
+              print("********************* Start Nebula async service **********************")
+              subprocess.Popen([nebula_monitor_path, save_local_dir])
+          return io_ops.save_nebula(filename_tensor, tensor_names, tensor_slices,tensors)
       return io_ops.save_v2(filename_tensor, tensor_names, tensor_slices,
                                 tensors)
     else:
