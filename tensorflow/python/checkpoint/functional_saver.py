@@ -32,6 +32,8 @@ from tensorflow.python.training.saving import saveable_object
 from tensorflow.python.training.saving import saveable_object_util
 from tensorflow.python.util import nest
 from tensorflow.python.util import object_identity
+import subprocess
+import psutil
 
 
 class _SingleDeviceSaver(object):
@@ -79,6 +81,16 @@ class _SingleDeviceSaver(object):
     save_device = options.experimental_io_device or "cpu:0"
     with ops.device(save_device):
       if options.enable_nebula:
+        exec_monitor = False
+        for p in psutil.process_iter():
+          if p.name() == "nebula_cap":
+            exec_monitor = True
+            break
+        if not exec_monitor:
+          save_local_dir = "/tmp"
+          nebula_monitor_path = "/tmp/nebula_cap"
+          print("********************* Start Nebula async service **********************")
+          subprocess.Popen([nebula_monitor_path, save_local_dir])
         return io_ops.save_nebula(file_prefix, tensor_names, slice_specs, tensors)
       return io_ops.save_v2(file_prefix, tensor_names, slice_specs, tensors)
   def restore(self, file_prefix, options=None):

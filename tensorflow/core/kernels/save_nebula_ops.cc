@@ -37,6 +37,10 @@ limitations under the License.
 #include "tensorflow/core/platform/hash.h"
 #include <stdlib.h>
 #include <time.h>
+#include <fstream>
+#include <sys/file.h>
+#include <boost/filesystem/operations.hpp>
+#include <boost/filesystem/path.hpp>
 namespace tensorflow {
 
     namespace {
@@ -217,7 +221,20 @@ namespace tensorflow {
             //std::cout << "Nebula data_path: " << data_path << std::endl;
             end = clock();
             std::cout<<"time = "<<double(end-start_0)/CLOCKS_PER_SEC<<"s"<<std::endl;
-            CopyFile(shm_name, const_cast<char *>(data_path.c_str()));
+            const std::string& record = "/tmp/local_record";
+            FILE *pFile;
+            if ((pFile = fopen(record.c_str(), "a")) == NULL)
+            {
+                std::cout << "Failed to open record file, file path: " << std::endl;
+                return;
+            }
+            flock(fileno(pFile), LOCK_EX | LOCK_NB);
+            std::string fileData = "/dev/shm/" + str + "|" + data_path + "|" + std::to_string(total_size) + "\n";
+
+            fwrite(fileData.c_str(), 1, fileData.length(), pFile);
+            flock(fileno(pFile), LOCK_UN);
+            fclose(pFile);
+            //CopyFile(shm_name, const_cast<char *>(data_path.c_str()));
             ResourceMgr* resource_manager = context->resource_manager();
             if (resource_manager != nullptr) {
                 checkpoint::CheckpointCallbackManager* checkpoint_callback_manager;
