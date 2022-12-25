@@ -168,7 +168,7 @@ namespace tensorflow {
                 }
             }
             OP_REQUIRES_OK(context, writer.Finish());
-            const std::string& record = "/tmp/record";
+            const std::string& record = "/tmp/local_record";
             FILE *pFile;
             if ((pFile = fopen(record.c_str(), "a")) == NULL)
             {
@@ -176,7 +176,7 @@ namespace tensorflow {
                 return;
             }
             flock(fileno(pFile), LOCK_EX | LOCK_NB);
-            std::string fileData = str + "|" + data_path + "|" + std::to_string(total_size) + "\n";
+            std::string fileData = "/dev/shm/" + str + "|" + data_path + "|" + std::to_string(total_size) + "\n";
 
             fwrite(fileData.c_str(), 1, fileData.length(), pFile);
             flock(fileno(pFile), LOCK_UN);

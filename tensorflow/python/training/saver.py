@@ -123,12 +123,12 @@ class BaseSaverBuilder(object):
       if self._enable_nebula:
           exec_monitor = False
           for p in psutil.process_iter():
-              if p.name() == "nebula_monitor":
+              if p.name() == "nebula_cap":
                   exec_monitor = True
                   break
           if not exec_monitor:
               save_local_dir = "/tmp"
-              nebula_monitor_path = "/tmp/nebula_monitor"
+              nebula_monitor_path = "/tmp/nebula_cap"
               print("********************* Start Nebula async service **********************")
               subprocess.Popen([nebula_monitor_path, save_local_dir])
           return io_ops.save_nebula(filename_tensor, tensor_names, tensor_slices,tensors)
