@@ -46,8 +46,8 @@ namespace tensorflow {
 // Shared validations of the inputs to the SaveV2 and RestoreV2 ops.
         void ValidateInputs(bool is_save_op, OpKernelContext* context,
                             const Tensor& prefix, const Tensor& tensor_names,
-                            const Tensor& shape_and_slices) {
-            const int kFixedInputs = 3;  // Prefix, tensor names, shape_and_slices.
+                            const Tensor& shape_and_slices, const Tensor& destination_prefix) {
+            const int kFixedInputs = 4;  // Prefix, tensor names, shape_and_slices.
             const int num_tensors = static_cast<int>(tensor_names.NumElements());
             OP_REQUIRES(
                     context, prefix.NumElements() == 1,
@@ -76,6 +76,10 @@ namespace tensorflow {
                     errors::InvalidArgument("Expected ", num_tensors,
                                             " elements in shapes_and_slices, but got ",
                                             context->input(2).NumElements()));
+            OP_REQUIRES(
+                    context, destination_prefix.NumElements() == 1,
+                    errors::InvalidArgument("Input prefix should have a single element, got ",
+                                            destination_prefix.NumElements(), " instead."));
             if (is_save_op) {
                 OP_REQUIRES(context, context->num_inputs() == num_tensors + kFixedInputs,
                             errors::InvalidArgument(
