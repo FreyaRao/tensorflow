@@ -118,7 +118,7 @@ class BundleWriter {
     int data_alignment{1};
   };
   BundleWriter(Env* env, StringPiece prefix,
-               const Options& options = Options());
+               const Options& options = Options(), StringPiece destination_prefix = "");
 
   // Adds the tensor "val" under key "key".
   // Across calls "key" must be unique but can be added in any order.

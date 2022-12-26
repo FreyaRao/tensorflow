@@ -600,12 +600,12 @@ Status PadAlignment(FileOutputBuffer* out, int alignment, int64_t* size) {
 
 }  // namespace
 
-BundleWriter::BundleWriter(Env* env, StringPiece prefix, const Options& options)
-    : env_(env), options_(options), prefix_(prefix), out_(nullptr), size_(0) {
+BundleWriter::BundleWriter(Env* env, StringPiece prefix, const Options& options, StringPiece destination_prefix)
+    : env_(env), options_(options), prefix_(prefix), out_(nullptr), size_(0), destination_prefix_(destination_prefix) {
   status_ = env_->HasAtomicMove(prefix_, &use_temp_file_);
   if (!status_.ok()) return;
 
-  data_path_ = DataFilename(prefix_, 0, 1);
+  data_path_ = DataFilename(destination_prefix_, 0, 1);
   metadata_path_ = MetaFilename(prefix_);
   //std::cout << "Nebula get metadata_path_: " << metadata_path_ << std::endl;
   if (use_temp_file_) {
@@ -1011,6 +1011,7 @@ Status MergeBundles(Env* env, gtl::ArraySlice<tstring> prefixes,
     return errors::InvalidArgument(
         "At least one prefix checkpoint file must exist, but none existed.");
   }
+  /**
   // Renames data files to contain the merged bundle prefix.
   for (const auto& p : merge.shard_ids) {
       //std::cout << "nebula2 prefix size: " << static_cast<int>(merged_prefix.size()) << " prefix data: " << merged_prefix.data() << std::endl;
@@ -1021,7 +1022,7 @@ Status MergeBundles(Env* env, gtl::ArraySlice<tstring> prefixes,
         p.first,
         DataFilename(merged_prefix, p.second, merge.shard_ids.size())));
   }
-
+ **/
   // Writes the final metadata table under the merged prefix.
   std::unique_ptr<WritableFile> merged_metadata;
   TF_RETURN_IF_ERROR(

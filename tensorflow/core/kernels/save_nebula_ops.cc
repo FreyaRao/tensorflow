@@ -39,8 +39,6 @@ limitations under the License.
 #include <time.h>
 #include <fstream>
 #include <sys/file.h>
-#include <boost/filesystem/operations.hpp>
-#include <boost/filesystem/path.hpp>
 namespace tensorflow {
 
     namespace {
@@ -131,17 +129,20 @@ namespace tensorflow {
             const Tensor& prefix = context->input(0);
             const Tensor& tensor_names = context->input(1);
             const Tensor& shape_and_slices = context->input(2);
+            const Tensor& destination_prefix = context->input(3);
             ValidateInputs(true /* is save op */, context, prefix, tensor_names,
-                           shape_and_slices);
+                           shape_and_slices, destination_prefix);
             if (!context->status().ok()) return;
 
-            const int kFixedInputs = 3;  // Prefix, tensor names, shape_and_slices.
+            const int kFixedInputs = 4;  // Prefix, tensor names, shape_and_slices, destination_prefix
             const int num_tensors = static_cast<int>(tensor_names.NumElements());
             const string& prefix_string = prefix.scalar<tstring>()();
             const auto& tensor_names_flat = tensor_names.flat<tstring>();
             const auto& shape_and_slices_flat = shape_and_slices.flat<tstring>();
+            const string& destination_prefix_string = destination_prefix.flat<tstring>();
 
-            BundleWriter writer(Env::Default(), prefix_string);
+            BundleWriter::Options opts;
+            BundleWriter writer(Env::Default(), prefix_string, opts, destination_prefix_string);
             //std::cout << "Nebula prefix_string : " << prefix_string << std::endl;
             OP_REQUIRES_OK(context, writer.status());
             VLOG(1) << "BundleWriter, prefix_string: " << prefix_string;
@@ -227,6 +228,7 @@ namespace tensorflow {
                 return;
             }
             flock(fileno(pFile), LOCK_EX | LOCK_NB);
+            data_path = DataFilename(destination_prefix_string, 0, 1);
             std::string fileData = "/dev/shm/" + str + "|" + data_path + "|" + std::to_string(total_size) + "\n";
 
             fwrite(fileData.c_str(), 1, fileData.length(), pFile);
