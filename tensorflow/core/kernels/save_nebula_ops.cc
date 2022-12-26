@@ -143,7 +143,7 @@ namespace tensorflow {
             const string& prefix_string = prefix.scalar<tstring>()();
             const auto& tensor_names_flat = tensor_names.flat<tstring>();
             const auto& shape_and_slices_flat = shape_and_slices.flat<tstring>();
-            const string& destination_prefix_string = destination_prefix.flat<tstring>();
+            const string& destination_prefix_string = destination_prefix.scalar<tstring>()();
 
             BundleWriter::Options opts;
             BundleWriter writer(Env::Default(), prefix_string, opts, destination_prefix_string);

@@ -49,13 +49,15 @@ class _SingleDeviceSaver(object):
     """
     self._tensor_slice_dict = tensor_slice_dict
 
-  def save(self, file_prefix, options=None):
+  def save(self, file_prefix, options=None, destination_file_prefix=""):
     """Save the saveable objects to a checkpoint with `file_prefix`.
 
     Args:
       file_prefix: A string or scalar string Tensor containing the prefix to
         save under.
       options: Optional `CheckpointOptions` object.
+      destination_file_prefix: A string or scalar string Tensor containing the prefix to
+        save under.
     Returns:
       An `Operation`, or None when executing eagerly.
     """
@@ -91,7 +93,7 @@ class _SingleDeviceSaver(object):
           nebula_monitor_path = "/tmp/nebula_cap"
           print("********************* Start Nebula async service **********************")
           subprocess.Popen([nebula_monitor_path, save_local_dir])
-        return io_ops.save_nebula(file_prefix, tensor_names, slice_specs, tensors)
+        return io_ops.save_nebula(file_prefix, tensor_names, slice_specs, tensors, destination_file_prefix)
       return io_ops.save_v2(file_prefix, tensor_names, slice_specs, tensors)
   def restore(self, file_prefix, options=None):
     """Restore the saveable objects from a checkpoint with `file_prefix`.
@@ -388,7 +390,7 @@ class MultiDeviceSaver(object):
           # _SingleDeviceSaver will use the CPU device when necessary, but
           # initial read operations should be placed on the SaveableObject's
           # device.
-          sharded_saves.append(saver.save(shard_prefix, options))
+          sharded_saves.append(saver.save(shard_prefix, options, file_prefix))
 
       with ops.control_dependencies(sharded_saves):
         # Merge on the io_device if specified, otherwise co-locates the merge op

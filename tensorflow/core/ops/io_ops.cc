@@ -88,6 +88,7 @@ REGISTER_OP("SaveNebula")
 .Input("tensor_names: string")
 .Input("shape_and_slices: string")
 .Input("tensors: dtypes")
+.Input("destination_prefix: string")
 .Attr("dtypes: list(type)")
 .SetIsStateful()
 .SetShapeFn([](InferenceContext* c) {

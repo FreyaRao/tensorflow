@@ -29,10 +29,9 @@ END
   in_arg {
      name: "destination_prefix"
      description: <<END
-  Must have a single element. The destination prefix of the V2 checkpoint to which we
-  write the tensors.
-  END
-    }
+Must have a single element. The destination prefix of the V2 checkpoint to which we write the tensors.
+END
+  }
   summary: "Saves tensors in V2 checkpoint format."
   description: <<END
 By default, saves the named tensors in full.  If the caller wishes to save
