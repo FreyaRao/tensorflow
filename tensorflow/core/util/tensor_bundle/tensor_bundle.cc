@@ -51,8 +51,6 @@ limitations under the License.
 #include <boost/interprocess/shared_memory_object.hpp>
 #include <boost/interprocess/mapped_region.hpp>
 #include <openssl/md5.h>
-#include <boost/uuid/detail/md5.hpp>
-#include <boost/algorithm/hex.hpp>
 #include <time.h>
 #ifdef PLATFORM_WINDOWS
 #undef DeleteFile
@@ -658,24 +656,16 @@ int BundleWriter::allocate(char* name, long size)
    return 0;
 }
 
-std::string BundleWriter::hash_shm(const char *filename, std::string result){
-  boost::uuids::detail::md5 hash;
-  boost::uuids::detail::md5::digest_type digest;
-
-  hash.process_bytes(filename, strlen(filename));
-  hash.get_digest(digest);
-  const auto charDigest = reinterpret_cast<const char *>(&digest);
-  boost::algorithm::hex(charDigest, charDigest + sizeof(boost::uuids::detail::md5::digest_type), std::back_inserter(result));
-  //std::cout << result << std::endl;
-  return result;
-}
-
-char * BundleWriter::md5_shm(const char *filename, char * result){
+std::string BundleWriter::md5_shm(const char * filename, std::string hex_){
     unsigned char digest[MD5_DIGEST_LENGTH];
-    MD5(reinterpret_cast<const unsigned char *>(filename), sizeof filename, (unsigned char*)&digest);
-    for(int i = 0; i < 16; i++)
-        sprintf(&result[i*2], "%02x", (unsigned int)digest[i]);
-    return result;
+    MD5(reinterpret_cast<const unsigned char *>(filename), strlen(filename), (unsigned char*)&digest);
+    const char map[] = "0123456789abcdef";
+    for (size_t i = 0; i < MD5_DIGEST_LENGTH; ++i) {
+        hex_ += map[digest[i] / 16];
+        hex_ += map[digest[i] % 16];
+    }
+    std::cout << "hex:   "<<hex_ << std::endl;
+    return hex_;
 }
 
 Status BundleWriter::Add(StringPiece key, const Tensor& val) {

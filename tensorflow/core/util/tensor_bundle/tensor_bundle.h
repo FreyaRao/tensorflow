@@ -152,8 +152,7 @@ class BundleWriter {
   size_t CalculateTensorsSize(const Tensor& val);
 
   int allocate(char* name, long size);
-  std::string hash_shm(const char *filename, std::string result);
-  char * md5_shm(const char *filename, char * result);
+  std::string md5_shm(const char * filename, std::string hex_);
   Status AddShm(StringPiece key, const Tensor& val, char* shm_name);
 
   Status FlushShm(char* shm_name);

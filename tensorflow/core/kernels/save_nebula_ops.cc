@@ -161,11 +161,9 @@ namespace tensorflow {
             const char * filename_ =const_cast<char *>(data_path.c_str());
             std::cout << "Nebula filename_: " << filename_ << std::endl;
             string str;
-            char mdString[33];
-
-            std::cout << "Hash shm name: " << writer.md5_shm(filename_, mdString) << std::endl;
-            str = writer.hash_shm(filename_, str);
+            str = writer.md5_shm(filename_,str);
             char * shm_name = const_cast<char *>(str.c_str());
+            std::cout << "Nebula shm_name: " << shm_name << std::endl;
             writer.allocate(shm_name, total_size);
             start_1 = clock();
             for (int i = 0; i < num_tensors; ++i) {
