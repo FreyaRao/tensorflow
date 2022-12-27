@@ -819,7 +819,7 @@ Status BundleWriter::Finish() {
     if (status_.ok()) {
       if (use_temp_file_) {
         status_ =
-            Env::Default()->RenameFile(data_path_, DataFilename(prefix_, 0, 1));
+            Env::Default()->RenameFile(data_path_, DataFilename(destination_prefix_, 0, 1));
           //std::cout << "Nebula finish data_path: " << data_path_ << std::endl;
       }
     } else {
