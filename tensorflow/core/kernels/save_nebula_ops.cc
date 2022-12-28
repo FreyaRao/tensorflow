@@ -125,7 +125,10 @@ namespace tensorflow {
 // Saves a list of named tensors using the tensor bundle library.
     class SaveNebula : public OpKernel {
     public:
-        explicit SaveNebula(OpKernelConstruction* context) : OpKernel(context) {}
+        explicit SaveNebula(OpKernelConstruction* context) : OpKernel(context) {
+            OP_REQUIRES_OK(context,
+                           context->GetAttr("use_sync_mode", &use_sync_mode_));
+        }
 
         void Compute(OpKernelContext* context) override {
             clock_t start_0, start_1, end;
@@ -224,21 +227,27 @@ namespace tensorflow {
             //std::cout << "Nebula data_path: " << data_path << std::endl;
             end = clock();
             std::cout<<"time = "<<double(end-start_0)/CLOCKS_PER_SEC<<"s"<<std::endl;
-            const std::string& record = "/tmp/local_record";
-            FILE *pFile;
-            if ((pFile = fopen(record.c_str(), "a")) == NULL)
-            {
-                std::cout << "Failed to open record file, file path: " << std::endl;
-                return;
-            }
-            flock(fileno(pFile), LOCK_EX | LOCK_NB);
-            data_path = DataFilename(destination_prefix_string, 0, 1);
-            std::string fileData = "/dev/shm/" + str + "|" + data_path + "|" + std::to_string(total_size) + "\n";
 
-            fwrite(fileData.c_str(), 1, fileData.length(), pFile);
-            flock(fileno(pFile), LOCK_UN);
-            fclose(pFile);
-            //CopyFile(shm_name, const_cast<char *>(data_path.c_str()));
+            if (use_sync_mode_){
+                CopyFile(shm_name, const_cast<char *>(data_path.c_str()));
+            }
+            else {
+                const std::string& record = "/tmp/local_record";
+                FILE *pFile;
+                if ((pFile = fopen(record.c_str(), "a")) == NULL)
+                {
+                    std::cout << "Failed to open record file, file path: " << std::endl;
+                    return;
+                }
+                flock(fileno(pFile), LOCK_EX | LOCK_NB);
+                data_path = DataFilename(destination_prefix_string, 0, 1);
+                std::string fileData = "/dev/shm/" + str + "|" + data_path + "|" + std::to_string(total_size) + "\n";
+
+                fwrite(fileData.c_str(), 1, fileData.length(), pFile);
+                flock(fileno(pFile), LOCK_UN);
+                fclose(pFile);
+            }
+
             ResourceMgr* resource_manager = context->resource_manager();
             if (resource_manager != nullptr) {
                 checkpoint::CheckpointCallbackManager* checkpoint_callback_manager;
@@ -258,6 +267,8 @@ namespace tensorflow {
                 checkpoint_callback_manager->Unref();
             }
         }
+    private:
+        bool use_sync_mode_;
     };
     REGISTER_KERNEL_BUILDER(Name("SaveNebula").Device(DEVICE_CPU), SaveNebula);
 

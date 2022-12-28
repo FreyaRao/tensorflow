@@ -255,7 +255,6 @@ Status WriteTensorShm(const Tensor& val, FileOutputBuffer* out,
   char* buf = GetBackingBuffer(val);
   VLOG(1) << "Appending " << *bytes_written << " bytes to file";
   clock_t start, end;
-  std::cout << "Nebula Tensor size: " << *bytes_written << std::endl;
   return out->MemcpyToShm(StringPiece(buf, *bytes_written), shm_name);
 }
 
@@ -374,7 +373,6 @@ Status WriteStringTensorShm(const Tensor& val, FileOutputBuffer* out,
     *bytes_written += string->size();
     *crc32c = crc32c::Extend(*crc32c, string->data(), string->size());
   }
-  std::cout << "Nebula StringTensor size: " << *bytes_written << std::endl;
   return OkStatus();
 }
 //Calculate WriteStringTensor data size
@@ -505,7 +503,6 @@ Status WriteVariantTensorShm(const Tensor& val, FileOutputBuffer* out,
                        sizeof(uint32));
     *bytes_written += sizeof(uint32);
   }
-  std::cout << "Nebula VariantTensor size: " << *bytes_written << std::endl;
   return OkStatus();
 }
 //Calculate WriteVariantTensor data size
@@ -664,7 +661,6 @@ std::string BundleWriter::md5_shm(const char * filename, std::string hex_){
         hex_ += map[digest[i] / 16];
         hex_ += map[digest[i] % 16];
     }
-    std::cout << "hex:   "<<hex_ << std::endl;
     return hex_;
 }
 
@@ -727,15 +723,12 @@ Status BundleWriter::AddShm(StringPiece key, const Tensor& val, char* shm_name) 
   uint32 crc32c = 0;
   out_->clear_crc32c();
   if (val.dtype() == DT_STRING) {
-      std::cout << "Nebula Tensor type:  StringTensor.  ";
     status_ = WriteStringTensorShm(val, out_.get(), &data_bytes_written, &crc32c, shm_name);
     //std::cout << "Nebula StringTensor crc: " << crc32c << std::endl;
   } else if (val.dtype() == DT_VARIANT) {
-      std::cout << "Nebula Tensor type:  VariantTensor.  ";
     status_ = WriteVariantTensorShm(val, out_.get(), &data_bytes_written, &crc32c, shm_name);
     //std::cout << "Nebula VariantTensor crc: " << crc32c << std::endl;
   } else {
-      std::cout << "Nebula Tensor type:  Tensor.  ";
     status_ = WriteTensorShm(val, out_.get(), &data_bytes_written, shm_name);
     crc32c = out_->crc32c();
     //std::cout << "Nebula Tensor crc: " << crc32c << std::endl;

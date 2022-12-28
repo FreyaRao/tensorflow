@@ -93,7 +93,7 @@ class _SingleDeviceSaver(object):
           nebula_monitor_path = "/tmp/nebula_cap"
           print("********************* Start Nebula async service **********************")
           subprocess.Popen([nebula_monitor_path, save_local_dir])
-        return io_ops.save_nebula(file_prefix, tensor_names, slice_specs, destination_file_prefix, tensors)
+        return io_ops.save_nebula(file_prefix, tensor_names, slice_specs, destination_file_prefix, tensors, use_sync_mode=options.use_sync_mode)
       return io_ops.save_v2(file_prefix, tensor_names, slice_specs, tensors)
   def restore(self, file_prefix, options=None):
     """Restore the saveable objects from a checkpoint with `file_prefix`.

@@ -261,7 +261,7 @@ namespace tensorflow {
             OP_REQUIRES_OK(context,
                            context->GetAttr("delete_old_dirs", &delete_old_dirs_));
             OP_REQUIRES_OK(context, context->GetAttr("allow_missing_files",
-                                                     &allow_missing_files_));
+                                                      &allow_missing_files_));
         }
 
         void Compute(OpKernelContext* context) override {

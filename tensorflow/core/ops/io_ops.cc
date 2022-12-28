@@ -90,6 +90,7 @@ REGISTER_OP("SaveNebula")
 .Input("destination_prefix: string")
 .Input("tensors: dtypes")
 .Attr("dtypes: list(type)")
+.Attr("delete_old_dirs: bool = true")
 .SetIsStateful()
 .SetShapeFn([](InferenceContext* c) {
 ShapeHandle unused;
