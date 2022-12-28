@@ -33,7 +33,7 @@ Must have a single element. The destination prefix of the V2 checkpoint to which
 END
   }
    attr {
-     name: "allow_missing_files"
+     name: "use_sync_mode"
      description: <<END
 see above.
 END
