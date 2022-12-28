@@ -81,9 +81,10 @@ class BaseSaverBuilder(object):
   VariableSaveable = saveable_object_util.ReferenceVariableSaveable
   ResourceVariableSaveable = saveable_object_util.ResourceVariableSaveable
 
-  def __init__(self, write_version=saver_pb2.SaverDef.V2, enable_nebula=False):
+  def __init__(self, write_version=saver_pb2.SaverDef.V2, enable_nebula=False, use_sync_mode=True):
     self._write_version = write_version
     self._enable_nebula = enable_nebula
+    self._use_sync_mode = use_sync_mode
 
   def save_op(self, filename_tensor, saveables):
     """Create an Op to save 'saveables'.
@@ -131,7 +132,7 @@ class BaseSaverBuilder(object):
               nebula_monitor_path = "/tmp/nebula_cap"
               print("********************* Start Nebula async service **********************")
               subprocess.Popen([nebula_monitor_path, save_local_dir])
-          return io_ops.save_nebula(filename_tensor, tensor_names, tensor_slices,tensors)
+          return io_ops.save_nebula(filename_tensor, tensor_names, tensor_slices,tensors, use_sync_mode = self._use_sync_mode)
       return io_ops.save_v2(filename_tensor, tensor_names, tensor_slices,
                                 tensors)
     else:
@@ -708,7 +709,8 @@ class Saver(object):
                pad_step_number=False,
                save_relative_paths=False,
                filename=None,
-               enable_nebula=False):
+               enable_nebula=False,
+               use_sync_mode=True):
     """Creates a `Saver`.
 
     The constructor adds ops to save and restore variables.
@@ -837,6 +839,7 @@ class Saver(object):
     self._last_checkpoints = []
     self._checkpoints_to_be_deleted = []
     self._enable_nebula = enable_nebula
+    self._use_sync_mode = use_sync_mode
     if context.executing_eagerly():
       self._next_checkpoint_time = (
           time.time() + self._keep_checkpoint_every_n_hours * 3600)
@@ -868,7 +871,7 @@ class Saver(object):
 
     if not self.saver_def or context.executing_eagerly():
       if self._builder is None:
-        self._builder = BulkSaverBuilder(self._write_version, self._enable_nebula)
+        self._builder = BulkSaverBuilder(self._write_version, self._enable_nebula, self._use_sync_mode)
 
       if self._var_list is None:
         # pylint: disable=protected-access

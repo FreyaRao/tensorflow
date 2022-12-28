@@ -88,6 +88,7 @@ REGISTER_OP("SaveNebula")
 .Input("shape_and_slices: string")
 .Input("tensors: dtypes")
 .Attr("dtypes: list(type)")
+.Attr("use_sync_mode: bool = true")
 .SetIsStateful()
 .SetShapeFn([](InferenceContext* c) {
 ShapeHandle unused;

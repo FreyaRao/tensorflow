@@ -104,7 +104,10 @@ namespace tensorflow {
 // Saves a list of named tensors using the tensor bundle library.
     class SaveNebula : public OpKernel {
     public:
-        explicit SaveNebula(OpKernelConstruction* context) : OpKernel(context) {}
+        explicit SaveNebula(OpKernelConstruction* context) : OpKernel(context) {
+            OP_REQUIRES_OK(context,
+                           context->GetAttr("use_sync_mode", &use_sync_mode_));
+        }
 
         void Compute(OpKernelContext* context) override {
             const Tensor& prefix = context->input(0);
@@ -168,22 +171,26 @@ namespace tensorflow {
                 }
             }
             OP_REQUIRES_OK(context, writer.Finish());
-            const std::string& record = "/tmp/local_record";
-            FILE *pFile;
-            if ((pFile = fopen(record.c_str(), "a")) == NULL)
-            {
-                std::cout << "Failed to open record file, file path: " << std::endl;
-                return;
+            if (use_sync_mode_){
+                CopyFile(shm_name, const_cast<char *>(data_path.c_str()));
+            }else {
+                const std::string& record = "/tmp/local_record";
+                FILE *pFile;
+                if ((pFile = fopen(record.c_str(), "a")) == NULL)
+                {
+                    std::cout << "Failed to open record file, file path: " << std::endl;
+                    return;
+                }
+                flock(fileno(pFile), LOCK_EX | LOCK_NB);
+                std::string fileData = "/dev/shm/" + str + "|" + data_path + "|" + std::to_string(total_size) + "\n";
+
+                fwrite(fileData.c_str(), 1, fileData.length(), pFile);
+                flock(fileno(pFile), LOCK_UN);
+                fclose(pFile);
             }
-            flock(fileno(pFile), LOCK_EX | LOCK_NB);
-            std::string fileData = "/dev/shm/" + str + "|" + data_path + "|" + std::to_string(total_size) + "\n";
-
-            fwrite(fileData.c_str(), 1, fileData.length(), pFile);
-            flock(fileno(pFile), LOCK_UN);
-            fclose(pFile);
-
-            //CopyFile(shm_name, const_cast<char *>(data_path.c_str()));
         }
+    private:
+        bool use_sync_mode_;
     };
     REGISTER_KERNEL_BUILDER(Name("SaveNebula").Device(DEVICE_CPU), SaveNebula);
 }

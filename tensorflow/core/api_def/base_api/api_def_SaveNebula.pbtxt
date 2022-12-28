@@ -26,6 +26,12 @@ END
 `N` tensors to save.
 END
   }
+  attr {
+    name: "use_sync_mode"
+    description: <<END
+see above.
+END
+   }
   summary: "Saves tensors in V2 checkpoint format."
   description: <<END
 By default, saves the named tensors in full.  If the caller wishes to save
