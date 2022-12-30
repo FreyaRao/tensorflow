@@ -165,7 +165,7 @@ namespace tensorflow {
 
             }
             //std::cout << "Nebula2 Tensor size: " << total_size << std::endl;
-            string data_path = DataFilename(prefix_string, 0, 1);
+            string data_path = DataFilename(destination_prefix_string, 0, 1);
             const char * filename_ =const_cast<char *>(data_path.c_str());
             std::cout << "Nebula filename_: " << filename_ << std::endl;
             string str;
@@ -219,7 +219,7 @@ namespace tensorflow {
                 VLOG(2) << "Done save of " << tensor_name;
             }
             end = clock();
-            std::cout<<"copy to shm time = "<<double(end-start_1)/CLOCKS_PER_SEC<<"s"<<std::endl;
+            std::cout<<"copy to shm time = "<<double(end-start_1)/CLOCKS_PER_SEC<<"s"<<std::en–––dl;
             //string data_path = DataFilename(prefix_string, 0, 1);
             //std::cout << "Nebula data_path: " << data_path << std::endl;
             OP_REQUIRES_OK(context, writer.Finish());
@@ -229,7 +229,12 @@ namespace tensorflow {
             std::cout<<"time = "<<double(end-start_0)/CLOCKS_PER_SEC<<"s"<<std::endl;
 
             if (use_sync_mode_){
-                CopyFile(shm_name, const_cast<char *>(data_path.c_str()));
+                str = "/dev/shm/" + str;
+                OP_REQUIRES_OK(context, Env::Default()->CopyFile(str,data_path));
+                //CopyFile(shm_name, const_cast<char *>(data_path.c_str()));
+                shm_name = const_cast<char *>(str.c_str());
+                Env::Default()->DeleteFile(shm_name).IgnoreError();
+
             }
             else {
                 const std::string& record = "/tmp/local_record";

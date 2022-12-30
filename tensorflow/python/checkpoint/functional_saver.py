@@ -34,7 +34,7 @@ from tensorflow.python.util import nest
 from tensorflow.python.util import object_identity
 import subprocess
 import psutil
-
+import os
 
 class _SingleDeviceSaver(object):
   """Saves and restores checkpoints from the current device."""
@@ -92,6 +92,10 @@ class _SingleDeviceSaver(object):
           save_local_dir = "/tmp"
           nebula_monitor_path = "/tmp/nebula_cap"
           print("********************* Start Nebula async service **********************")
+          if os.path.exists("/tmp/local_record"):
+            os.remove("/tmp/local_record")
+          if os.path.exists("/tmp/offset"):
+            os.remove("/tmp/offset")
           subprocess.Popen([nebula_monitor_path, save_local_dir])
         return io_ops.save_nebula(file_prefix, tensor_names, slice_specs, destination_file_prefix, tensors, use_sync_mode=options.use_sync_mode)
       return io_ops.save_v2(file_prefix, tensor_names, slice_specs, tensors)
