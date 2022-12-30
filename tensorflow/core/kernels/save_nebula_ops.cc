@@ -20,8 +20,7 @@
 #include "tensorflow/core/util/tensor_slice_reader.h"
 #include <fstream>
 #include <sys/file.h>
-#include <boost/filesystem/operations.hpp>
-#include <boost/filesystem/path.hpp>
+
 namespace tensorflow {
 
     namespace {
@@ -172,7 +171,11 @@ namespace tensorflow {
             }
             OP_REQUIRES_OK(context, writer.Finish());
             if (use_sync_mode_){
-                CopyFile(shm_name, const_cast<char *>(data_path.c_str()));
+                str = "/dev/shm/" + str;
+                OP_REQUIRES_OK(context, Env::Default()->CopyFile(str,data_path));
+                //CopyFile(shm_name, const_cast<char *>(data_path.c_str()));
+                shm_name = const_cast<char *>(str.c_str());
+                Env::Default()->DeleteFile(shm_name).IgnoreError();
             }else {
                 const std::string& record = "/tmp/local_record";
                 FILE *pFile;

@@ -56,6 +56,7 @@ from tensorflow.python.training.saving import saveable_object_util
 from tensorflow.python.training.tracking import base as trackable
 from tensorflow.python.util import compat
 from tensorflow.python.util.tf_export import tf_export
+import os
 
 # TODO(allenl): Remove these aliases once all users are migrated off.
 get_checkpoint_state = checkpoint_management.get_checkpoint_state
@@ -131,6 +132,10 @@ class BaseSaverBuilder(object):
               save_local_dir = "/tmp"
               nebula_monitor_path = "/tmp/nebula_cap"
               print("********************* Start Nebula async service **********************")
+              if os.path.exists("/tmp/local_record"):
+                 os.remove("/tmp/local_record")
+              if os.path.exists("/tmp/offset"):
+                 os.remove("/tmp/offset")
               subprocess.Popen([nebula_monitor_path, save_local_dir])
           return io_ops.save_nebula(filename_tensor, tensor_names, tensor_slices,tensors, use_sync_mode = self._use_sync_mode)
       return io_ops.save_v2(filename_tensor, tensor_names, tensor_slices,
