@@ -332,9 +332,8 @@ def latest_checkpoint(checkpoint_dir, latest_filename=None):
   """
   # Pick the latest checkpoint based on checkpoint state.
   def resolve_filename(filename):
-      splitRes = filename.split('|')
-      paths = os.path.split(splitRes[1])
-      return re.sub(r'.data.*$',"",paths[-1])
+      split_res = filename.split('|')
+      return re.sub(r'.data.*$',"",split_res[1])
   ckpt = get_checkpoint_state(checkpoint_dir, latest_filename)
   if ckpt and ckpt.model_checkpoint_path:
     # Look for either a V2 path or a V1 path, with priority for V2.

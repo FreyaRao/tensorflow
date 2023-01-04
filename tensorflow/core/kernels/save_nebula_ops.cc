@@ -184,7 +184,7 @@ namespace tensorflow {
                     return;
                 }
                 flock(fileno(pFile), LOCK_EX | LOCK_NB);
-                std::string fileData = "/dev/shm/" + str + "|" + data_path + "|" + std::to_string(total_size) + "｜SYNC" + "\n";
+                std::string fileData = str + "|" + data_path + "|" + std::to_string(total_size) + "|SYNC" + "\n";
 
                 fwrite(fileData.c_str(), 1, fileData.length(), pFile);
                 flock(fileno(pFile), LOCK_UN);
