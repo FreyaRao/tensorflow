@@ -219,7 +219,7 @@ namespace tensorflow {
                 VLOG(2) << "Done save of " << tensor_name;
             }
             end = clock();
-            std::cout<<"copy to shm time = "<<double(end-start_1)/CLOCKS_PER_SEC<<"s"<<std::en–––dl;
+            std::cout<<"copy to shm time = "<<double(end-start_1)/CLOCKS_PER_SEC<<"s"<<std::endl;
             //string data_path = DataFilename(prefix_string, 0, 1);
             //std::cout << "Nebula data_path: " << data_path << std::endl;
             OP_REQUIRES_OK(context, writer.Finish());
