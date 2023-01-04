@@ -1303,6 +1303,10 @@ class ModelCheckpoint(Callback):
       if options is None or isinstance(
           options, checkpoint_options_lib.CheckpointOptions):
         self._options = options or checkpoint_options_lib.CheckpointOptions()
+        if self._options.enable_nebula and not os.path.isabs(self.filepath):
+          raise ValueError(
+            "If use nebula, please use absolute file path to save."
+          )
       else:
         raise TypeError('If save_weights_only is True, then `options` must be '
                         'either None or a tf.train.CheckpointOptions')
