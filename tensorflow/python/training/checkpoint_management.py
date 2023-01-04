@@ -331,6 +331,10 @@ def latest_checkpoint(checkpoint_dir, latest_filename=None):
     The full path to the latest checkpoint or `None` if no checkpoint was found.
   """
   # Pick the latest checkpoint based on checkpoint state.
+  def resolve_filename(filename):
+      splitRes = filename.split('|')
+      paths = os.path.split(splitRes[1])
+      return re.sub(r'.data.*$',"",paths[-1])
   ckpt = get_checkpoint_state(checkpoint_dir, latest_filename)
   if ckpt and ckpt.model_checkpoint_path:
     # Look for either a V2 path or a V1 path, with priority for V2.
@@ -340,7 +344,12 @@ def latest_checkpoint(checkpoint_dir, latest_filename=None):
                                          saver_pb2.SaverDef.V1)
     if file_io.get_matching_files(v2_path) or file_io.get_matching_files(
         v1_path):
-      return ckpt.model_checkpoint_path
+      offset_file = open('/tmp/offset', 'r')
+      offset_lines = offset_file.readlines()
+      for line in offset_lines:
+          ckpt_path = resolve_filename(line)
+          if ckpt_path == ckpt.model_checkpoint_path:
+              return ckpt.model_checkpoint_path
     else:
       logging.error("Couldn't match files for checkpoint %s",
                     ckpt.model_checkpoint_path)

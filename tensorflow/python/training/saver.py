@@ -845,6 +845,10 @@ class Saver(object):
     self._checkpoints_to_be_deleted = []
     self._enable_nebula = enable_nebula
     self._use_sync_mode = use_sync_mode
+    if self._enable_nebula and os.path.isabs(self._filename) == False:
+        raise ValueError(
+            "If use nebula, please use absolute file path to save."
+        )
     if context.executing_eagerly():
       self._next_checkpoint_time = (
           time.time() + self._keep_checkpoint_every_n_hours * 3600)
