@@ -16,8 +16,8 @@ limitations under the License.
 #include <memory>
 #include <string>
 
-#include "tensorflow/compiler/xla/service/hlo_instruction.h"
-#include "tensorflow/compiler/xla/service/hlo_sharding.h"
+#include "tensorflow/compiler/xla/hlo/ir/hlo_instruction.h"
+#include "tensorflow/compiler/xla/hlo/ir/hlo_sharding.h"
 
 #ifndef TENSORFLOW_COMPILER_XLA_SERVICE_CUSTOM_CALL_SHARDING_HELPER_H_
 #define TENSORFLOW_COMPILER_XLA_SERVICE_CUSTOM_CALL_SHARDING_HELPER_H_
@@ -53,6 +53,10 @@ class CustomCallPartitioner : public CustomCallShardingHelper {
  public:
   virtual xla::Status Partition(spmd::SpmdPartitioningVisitor* partitioner,
                                 HloInstruction* hlo) const;
+
+  // Returns if the given side-effecting custom-call is allowed to have
+  // replicated sharding.
+  virtual bool CanSideEffectingHaveReplicatedSharding() const { return false; }
 };
 
 // Fetch partitioning overrides on a per-custom_call_target basis.

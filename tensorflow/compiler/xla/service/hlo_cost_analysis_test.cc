@@ -16,7 +16,9 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/hlo_cost_analysis.h"
 
 #include <memory>
+#include <string>
 #include <utility>
+#include <vector>
 
 #include "tensorflow/compiler/xla/client/client.h"
 #include "tensorflow/compiler/xla/client/client_library.h"
@@ -24,7 +26,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/client/padding.h"
 #include "tensorflow/compiler/xla/client/xla_builder.h"
 #include "tensorflow/compiler/xla/client/xla_computation.h"
-#include "tensorflow/compiler/xla/service/hlo_module.h"
+#include "tensorflow/compiler/xla/hlo/ir/hlo_module.h"
 #include "tensorflow/compiler/xla/service/hlo_parser.h"
 #include "tensorflow/compiler/xla/service/local_service.h"
 #include "tensorflow/compiler/xla/service/service.h"
@@ -134,8 +136,6 @@ class HloCostAnalysisTest : public ::testing::Test {
   XlaComputation max_;
   XlaComputation gt_;
 };
-
-using HloCostAnalysisHloTest = HloTestBase;
 
 TEST_F(HloCostAnalysisTest, MatrixMultiply) {
   XlaBuilder builder("matrix_multiply");
@@ -494,6 +494,33 @@ TEST_F(HloCostAnalysisTest, ReduceWindow) {
   EXPECT_EQ(analysis.output_bytes_accessed(*root), sizeof(float) * 2 * 4);
 }
 
+TEST_F(HloCostAnalysisTest, ReduceWindowWithOverlaps) {
+  XlaBuilder builder("reduce_window");
+  auto input =
+      Parameter(&builder, 0, ShapeUtil::MakeShape(F32, {8, 8}), "input");
+  ReduceWindow(input, ConstantR0<float>(&builder, 0), add_, {4, 5}, {2, 1},
+               Padding::kValid);
+
+  auto hlo_module = BuildHloGraph(&builder);
+  HloInstruction* root = hlo_module->entry_computation()->root_instruction();
+  int n_output_elements = 3 * 4;
+
+  // Run HLO cost analysis.
+  HloCostAnalysis analysis(ShapeSize);
+  ASSERT_IS_OK(root->Accept(&analysis));
+
+  // Each of the output elements are generated from reducing [4x5] elements.
+  EXPECT_EQ(analysis.flop_count(), n_output_elements * (4 * 5 - 1));
+
+  EXPECT_EQ(analysis.bytes_accessed(),
+            sizeof(float) * (8 * 8 + 1 + n_output_elements));
+
+  EXPECT_EQ(analysis.operand_bytes_accessed(*root, 0), sizeof(float) * 8 * 8);
+  EXPECT_EQ(analysis.operand_bytes_accessed(*root, 1), sizeof(float) * 1);
+  EXPECT_EQ(analysis.output_bytes_accessed(*root),
+            sizeof(float) * n_output_elements);
+}
+
 TEST_F(HloCostAnalysisTest, ReduceWindowSingleDimReduceBroadcast) {
   absl::string_view hlo_text = R"(
  HloModule fusion.50
@@ -510,7 +537,7 @@ ENTRY fusion.50 {
   ROOT reduce-window.159 = f32[2,3,1024,1024]{2,3,1,0} reduce-window(param0, constant.367), window={size=1x1x1x2047 pad=0_0x0_0x0_0x1023_1023}, to_apply=region_0.868
 }
 )";
-  auto hlo_module = ParseAndReturnUnverifiedModule(hlo_text).ValueOrDie();
+  auto hlo_module = ParseAndReturnUnverifiedModule(hlo_text).value();
   HloCostAnalysis analysis(ShapeSize);
   ASSERT_IS_OK(
       hlo_module->entry_computation()->root_instruction()->Accept(&analysis));
@@ -959,6 +986,39 @@ ENTRY entry {
             sizeof(float) * 2 * 2 * 2);
 }
 
+TEST_F(FusionCostAnalysis, IgnoreUnusedParameterShape) {
+  absl::string_view hlo_string = R"(
+HloModule m
+
+f {
+  p0 = (s8[3], s8[100]) parameter(0)
+  gte0 = s8[3] get-tuple-element(p0), index=0
+  c1 = s8[3] constant(0)
+  a1 = s8[3] add(gte0, c1)
+  ROOT r1 = s8[3] add(a1, c1)
+}
+
+ENTRY e {
+  param0 = (s8[3], s8[100]) parameter(0)
+  ROOT r0 = s8[3] fusion(param0), kind=kInput, calls=f
+}
+)";
+  TF_ASSERT_OK_AND_ASSIGN(auto module,
+                          ParseAndReturnVerifiedModule(hlo_string));
+
+  HloInstruction* root = module->entry_computation()->root_instruction();
+
+  HloCostAnalysis analysis(ShapeSize);
+  ASSERT_IS_OK(root->Accept(&analysis));
+
+  EXPECT_EQ(analysis.output_bytes_accessed(*root), 3);
+  // 2-element tuple (pointers) + its 3-element shape #0
+  EXPECT_EQ(analysis.operand_bytes_accessed(*root, 0), 2 * kPointerSize + 3);
+  // Same as above + non-scalar constant c1 + output.
+  EXPECT_EQ(analysis.bytes_accessed(*root), 2 * kPointerSize + 3 + 3 + 3);
+  EXPECT_EQ(analysis.bytes_accessed(), 2 * kPointerSize + 3 + 3 + 3);
+}
+
 TEST_F(FusionCostAnalysis, InfeedOutfeed) {
   absl::string_view hlo_string = R"(
 HloModule module, is_scheduled=true
@@ -1278,6 +1338,223 @@ TEST_F(HloCostAnalysisTest, MultioutputScatter) {
   EXPECT_EQ(analysis.operand_bytes_accessed(*root, 3), sizeof(float) * 2 * 3);
   EXPECT_EQ(analysis.operand_bytes_accessed(*root, 4), sizeof(int32_t) * 2 * 3);
   EXPECT_EQ(analysis.output_bytes_accessed(*root), 2 * sizeof(float) * 2 * 3);
+}
+
+TEST_F(FusionCostAnalysis, Broadcast) {
+  absl::string_view hlo_string = R"(
+HloModule m
+
+f {
+  p0 = s8[] parameter(0)
+  c1 = s8[] constant(0)
+  a1 = s8[] add(p0, c1)
+  b1 = s8[10000] broadcast(a1), dimensions={}
+  b2 = s8[10000] broadcast(c1), dimensions={}
+  ROOT r1 = s8[10000] add(b1, b2)
+}
+
+ENTRY e {
+  param0 = s8[] parameter(0)
+  ROOT r0 = s8[10000] fusion(param0), kind=kInput, calls=f
+}
+)";
+  TF_ASSERT_OK_AND_ASSIGN(auto module,
+                          ParseAndReturnVerifiedModule(hlo_string));
+
+  HloInstruction* root = module->entry_computation()->root_instruction();
+
+  HloCostAnalysis analysis(ShapeSize);
+  ASSERT_IS_OK(root->Accept(&analysis));
+
+  EXPECT_EQ(analysis.output_bytes_accessed(*root), 10000);
+  EXPECT_EQ(analysis.operand_bytes_accessed(*root, 0), 1);
+  EXPECT_EQ(analysis.bytes_accessed(*root), 10000 + 1);
+  EXPECT_EQ(analysis.bytes_accessed(), 10000 + 1);
+}
+
+TEST_F(FusionCostAnalysis, RevisitModifiedFusion) {
+  Shape r2f32 = ShapeUtil::MakeShape(F32, {2, 2});
+  HloComputation::Builder builder(TestName());
+  HloInstruction* c1 = builder.AddInstruction(
+      HloInstruction::CreateConstant(LiteralUtil::CreateR2F32Linspace(
+          /*from=*/0.0f, /*to=*/1.0f, /*rows=*/2, /*cols=*/2)));
+  HloInstruction* add = builder.AddInstruction(
+      HloInstruction::CreateBinary(r2f32, HloOpcode::kAdd, c1, c1));
+  HloInstruction* mul = builder.AddInstruction(
+      HloInstruction::CreateBinary(r2f32, HloOpcode::kMultiply, add, add));
+  HloInstruction* neg = builder.AddInstruction(
+      HloInstruction::CreateUnary(r2f32, HloOpcode::kNegate, mul));
+
+  auto module = CreateNewVerifiedModule();
+  HloComputation* computation = module->AddEntryComputation(builder.Build());
+  HloInstruction* fusion = computation->CreateFusionInstruction(
+      {neg, mul, add}, HloInstruction::FusionKind::kLoop);
+
+  HloCostAnalysis::Options options{ShapeSize};
+  HloCostAnalysis analysis(options);
+  ASSERT_IS_OK(fusion->Accept(&analysis));
+
+  constexpr int64_t bytes_accessed = sizeof(float) * 2 * 2 * 2;
+  static_assert(bytes_accessed == 32, "");
+
+  EXPECT_EQ(analysis.flop_count(), 4 * 3);
+  EXPECT_EQ(analysis.transcendental_count(), 0);
+  EXPECT_EQ(analysis.bytes_accessed(), bytes_accessed);
+  EXPECT_EQ(analysis.operand_bytes_accessed(*fusion, 0), sizeof(float) * 2 * 2);
+  EXPECT_EQ(analysis.output_bytes_accessed(*fusion), sizeof(float) * 2 * 2);
+
+  // Revisit the root (fusion) instruction and expect no changes.
+
+  ASSERT_IS_OK(analysis.RevisitInstruction(fusion));
+
+  EXPECT_EQ(analysis.flop_count(), 4 * 3);
+  EXPECT_EQ(analysis.transcendental_count(), 0);
+  EXPECT_EQ(analysis.bytes_accessed(), bytes_accessed);
+  EXPECT_EQ(analysis.operand_bytes_accessed(*fusion, 0), sizeof(float) * 2 * 2);
+  EXPECT_EQ(analysis.output_bytes_accessed(*fusion), sizeof(float) * 2 * 2);
+
+  // Now modify the fusion and verify that the partially updated analysis is
+  // correct.
+
+  HloComputation* fused_computation = fusion->fused_instructions_computation();
+  HloInstruction* to_replace = fused_computation->root_instruction();
+
+  // Replace negate(multiply(...)) with exp(multiply(...)) at the fusion root.
+  HloInstruction* exp =
+      fused_computation->AddInstruction(HloInstruction::CreateUnary(
+          r2f32, HloOpcode::kExp, to_replace->mutable_operand(0)));
+  ASSERT_IS_OK(fused_computation->ReplaceInstruction(to_replace, exp));
+  ASSERT_IS_OK(module->Verify());
+
+  ASSERT_IS_OK(analysis.RevisitInstruction(fusion));
+
+  // One floating point instruction (kNegate) removed.
+  EXPECT_EQ(analysis.flop_count(), 4 * 2);
+  // One transcendental instruction (kExp) added.
+  EXPECT_EQ(analysis.transcendental_count(), 4);
+  // The rest remains unchanged.
+  EXPECT_EQ(analysis.bytes_accessed(), bytes_accessed);
+  EXPECT_EQ(analysis.operand_bytes_accessed(*fusion, 0), sizeof(float) * 2 * 2);
+  EXPECT_EQ(analysis.output_bytes_accessed(*fusion), sizeof(float) * 2 * 2);
+}
+
+using Properties = HloCostAnalysis::Properties;
+constexpr auto kFlopsKey = HloCostAnalysis::kFlopsKey;
+constexpr auto kTranscendentalsKey = HloCostAnalysis::kTranscendentalsKey;
+constexpr auto kBytesAccessedKey = HloCostAnalysis::kBytesAccessedKey;
+constexpr auto kOptimalSecondsKey = HloCostAnalysis::kOptimalSecondsKey;
+constexpr auto kUtilizationKey = HloCostAnalysis::kUtilizationKey;
+constexpr auto kReserved0Key = HloCostAnalysis::kReserved0Key;
+constexpr auto kReserved1Key = HloCostAnalysis::kReserved1Key;
+
+TEST(HloCostAnalysisProperties, ZeroWhenInitialized) {
+  Properties p;
+  EXPECT_EQ(0, p[kFlopsKey]);
+  EXPECT_EQ(0, p[kTranscendentalsKey]);
+  EXPECT_EQ(0, p[kBytesAccessedKey]);
+  EXPECT_EQ(0, p[kOptimalSecondsKey]);
+  EXPECT_EQ(0, p[kUtilizationKey]);
+  EXPECT_EQ(0, p[kReserved0Key]);
+  EXPECT_EQ(0, p[kReserved1Key]);
+
+  EXPECT_EQ(0, p.operand_utilization(0, {}));
+  EXPECT_EQ(0, p.operand_utilization(1, {}));
+  EXPECT_EQ(0, p.operand_utilization(2, {}));
+  EXPECT_EQ(0, p.operand_utilization(0, {0}));
+  EXPECT_EQ(0, p.operand_utilization(2, {0}));
+  EXPECT_EQ(0, p[HloCostAnalysis::GetOperandUtilizationKey(0, {})]);
+  EXPECT_EQ(0, p[HloCostAnalysis::GetOperandUtilizationKey(1, {})]);
+  EXPECT_EQ(0, p[HloCostAnalysis::GetOperandUtilizationKey(2, {})]);
+  EXPECT_EQ(0, p[HloCostAnalysis::GetOperandUtilizationKey(0, {0})]);
+  EXPECT_EQ(0, p[HloCostAnalysis::GetOperandUtilizationKey(2, {0})]);
+
+  EXPECT_EQ(0, p.operand_bytes_accessed(0, {}));
+  EXPECT_EQ(0, p.operand_bytes_accessed(1, {}));
+  EXPECT_EQ(0, p.operand_bytes_accessed(2, {}));
+  EXPECT_EQ(0, p.operand_bytes_accessed(0, {0}));
+  EXPECT_EQ(0, p.operand_bytes_accessed(2, {0}));
+  EXPECT_EQ(0, p[HloCostAnalysis::GetOperandBytesAccessedKey(0, {})]);
+  EXPECT_EQ(0, p[HloCostAnalysis::GetOperandBytesAccessedKey(1, {})]);
+  EXPECT_EQ(0, p[HloCostAnalysis::GetOperandBytesAccessedKey(2, {})]);
+  EXPECT_EQ(0, p[HloCostAnalysis::GetOperandBytesAccessedKey(0, {0})]);
+  EXPECT_EQ(0, p[HloCostAnalysis::GetOperandBytesAccessedKey(2, {0})]);
+
+  EXPECT_EQ(0, p.output_bytes_accessed({}));
+  EXPECT_EQ(0, p.output_bytes_accessed({0}));
+  EXPECT_EQ(0, p[HloCostAnalysis::GetOutputBytesAccessedKey({})]);
+  EXPECT_EQ(0, p[HloCostAnalysis::GetOutputBytesAccessedKey({0})]);
+
+  EXPECT_EQ(0, p["foobar"]);
+
+  std::vector<std::pair<std::string, float>> vals;
+  Properties().ForEach([&](absl::string_view key, float val) {
+    vals.push_back({std::string(key), val});
+  });
+  EXPECT_THAT(vals, ::testing::IsEmpty());
+}
+
+TEST(HloCostAnalysisProperties, SetValues) {
+  Properties p;
+
+  p[kFlopsKey] = 1;
+  p[kTranscendentalsKey] = 2;
+  p[kBytesAccessedKey] = 3;
+  p[kOptimalSecondsKey] = 4;
+  p[kUtilizationKey] = 5;
+  p[kReserved0Key] = 6;
+  p[kReserved1Key] = 7;
+  EXPECT_EQ(1, p[kFlopsKey]);
+  EXPECT_EQ(2, p[kTranscendentalsKey]);
+  EXPECT_EQ(3, p[kBytesAccessedKey]);
+  EXPECT_EQ(4, p[kOptimalSecondsKey]);
+  EXPECT_EQ(5, p[kUtilizationKey]);
+  EXPECT_EQ(6, p[kReserved0Key]);
+  EXPECT_EQ(7, p[kReserved1Key]);
+
+  p.set_operand_utilization(0, {}, 10);
+  p.set_operand_utilization(1, {}, 11);
+  p.set_operand_utilization(2, {}, 12);
+  p.set_operand_utilization(0, {0}, 13);
+  p.set_operand_utilization(2, {0}, 14);
+  EXPECT_EQ(10, p.operand_utilization(0, {}));
+  EXPECT_EQ(11, p.operand_utilization(1, {}));
+  EXPECT_EQ(12, p.operand_utilization(2, {}));
+  EXPECT_EQ(13, p.operand_utilization(0, {0}));
+  EXPECT_EQ(14, p.operand_utilization(2, {0}));
+  EXPECT_EQ(10, p[HloCostAnalysis::GetOperandUtilizationKey(0, {})]);
+  EXPECT_EQ(11, p[HloCostAnalysis::GetOperandUtilizationKey(1, {})]);
+  EXPECT_EQ(12, p[HloCostAnalysis::GetOperandUtilizationKey(2, {})]);
+  EXPECT_EQ(13, p[HloCostAnalysis::GetOperandUtilizationKey(0, {0})]);
+  EXPECT_EQ(14, p[HloCostAnalysis::GetOperandUtilizationKey(2, {0})]);
+
+  p.set_operand_bytes_accessed(0, {}, 20);
+  p.set_operand_bytes_accessed(1, {}, 21);
+  p.set_operand_bytes_accessed(2, {}, 22);
+  p.set_operand_bytes_accessed(0, {0}, 23);
+  p.set_operand_bytes_accessed(2, {0}, 24);
+  EXPECT_EQ(20, p.operand_bytes_accessed(0, {}));
+  EXPECT_EQ(21, p.operand_bytes_accessed(1, {}));
+  EXPECT_EQ(22, p.operand_bytes_accessed(2, {}));
+  EXPECT_EQ(23, p.operand_bytes_accessed(0, {0}));
+  EXPECT_EQ(24, p.operand_bytes_accessed(2, {0}));
+  EXPECT_EQ(20, p[HloCostAnalysis::GetOperandBytesAccessedKey(0, {})]);
+  EXPECT_EQ(21, p[HloCostAnalysis::GetOperandBytesAccessedKey(1, {})]);
+  EXPECT_EQ(22, p[HloCostAnalysis::GetOperandBytesAccessedKey(2, {})]);
+  EXPECT_EQ(23, p[HloCostAnalysis::GetOperandBytesAccessedKey(0, {0})]);
+  EXPECT_EQ(24, p[HloCostAnalysis::GetOperandBytesAccessedKey(2, {0})]);
+
+  p.set_output_bytes_accessed({}, 30);
+  p.set_output_bytes_accessed({0}, 31);
+  EXPECT_EQ(30, p.output_bytes_accessed({}));
+  EXPECT_EQ(31, p.output_bytes_accessed({0}));
+  EXPECT_EQ(30, p[HloCostAnalysis::GetOutputBytesAccessedKey({})]);
+  EXPECT_EQ(31, p[HloCostAnalysis::GetOutputBytesAccessedKey({0})]);
+
+  p["foo"] = 100;
+  EXPECT_EQ(100, p["foo"]);
+
+  p["bar"] += 101;
+  EXPECT_EQ(101, p["bar"]);
 }
 
 }  // namespace

@@ -21,6 +21,7 @@ limitations under the License.
 
 #include "llvm/Support/SourceMgr.h"
 #include "mlir/Parser/Parser.h"  // from @llvm-project
+#include "tensorflow/compiler/jit/flags.h"
 #include "tensorflow/compiler/mlir/tfrt/runtime_fallback/runtime_fallback_executor.h"
 #include "tensorflow/compiler/mlir/tfrt/transforms/passes.h"
 #include "tensorflow/compiler/mlir/tfrt/utils/host_context.h"
@@ -39,10 +40,10 @@ using ::tfrt::RemainingResults;
 using ::tfrt::RequestContext;
 using ::tfrt::RequestContextBuilder;
 
+using ::tfrt::jitrt::HostContextAsyncTaskRunner;
 using ::tfrt::jitrt::RemainingResultsConverter;
 
 using ::xla::runtime::Executable;
-using ::xla::runtime::HostContextAsyncTaskRunner;
 using ::xla::runtime::JitExecutable;
 using ::xla::runtime::MemrefDesc;
 
@@ -90,6 +91,9 @@ void RunJitRtBenchmark(::testing::benchmark::State& state,
                       : CreateSingleThreadedHostContext();
 
   TfJitRtPipelineOptions tf_jitrt_opts;
+  tf_jitrt_opts.enable_xla_cpu_transformations =
+      tensorflow::GetJitRtFlags().enable_xla_cpu_transformations;
+  tf_jitrt_opts.lower_to_mmt4d = tensorflow::GetJitRtFlags().pack_matmul;
   tf_jitrt_opts.vectorize = vectorize;
   tf_jitrt_opts.codegen_transpose = codegen_transpose;
   JitExecutable& jit_executable =
@@ -124,7 +128,7 @@ void RunJitRtBenchmark(::testing::benchmark::State& state,
   host->Await({executable->CopyRef()});
 
   CHECK(!executable->IsError())
-      << "Failed to get executable: " << tfrt::StrCat(executable->GetError());
+      << "Failed to get executable: " << executable->GetError().message();
   CHECK(!(*executable)->IsAsync()) << "async results are not supported";
 
   // Placeholders for returned values.

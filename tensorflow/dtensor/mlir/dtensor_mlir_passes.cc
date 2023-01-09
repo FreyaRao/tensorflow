@@ -119,6 +119,13 @@ void CreateDTensorMLIRPass(const mlir::TF::StandardPipelineOptions &options,
   pm->addNestedPass<mlir::func::FuncOp>(
       CreateDTensorUndoMergeConstAcrossMesh());
 
+  // Backward functions insert tf.IdentityOp before CopyToMesh's gradient Ops.
+  // These tf.IdentityOp are semantically no-op to DTensor, but stops the
+  // backward mesh propagation into the originating tf.ConstOp. Elide the no-op
+  // tf.IdentityOp to workaround this.
+  pm->addNestedPass<mlir::func::FuncOp>(
+      CreateDTensorElideIdentityBeforeCopyToMesh());
+
   // Propagate mesh cluster config and cluster ops by mesh cluster so that
   // SPMD expansion can be isolated to a single device mesh.
   pm->addNestedPass<mlir::func::FuncOp>(CreateDTensorOpToDeviceClusterPass());
@@ -273,6 +280,11 @@ void CreateDTensorMLIRPass(const mlir::TF::StandardPipelineOptions &options,
     pm->addPass(mlir::TFDevice::CreateResourceOpLiftingPass());
     pm->addPass(mlir::TFDevice::CreateClusterOutliningPass());
 
+    // Prepare for XLA SPMD integration for XLA SPMD mesh. If there are layout
+    // operations on XLA SPMD mesh, then convert all of them to appropriate
+    // XLA sharding attributes.
+    pm->addPass(CreateDTensorXlaSpmdIntegration());
+
     // Rename functions with unique names, to avoid collisions in the function
     // library.
     pm->addPass(CreateFunctionRenamingPass());
@@ -289,7 +301,7 @@ void CreateDTensorMLIRPass(const mlir::TF::StandardPipelineOptions &options,
     // Convert compilation and replication attributes to unified attributes
     // expected by TPURewritePass.
     pm->addNestedPass<mlir::func::FuncOp>(
-        mlir::TFTPU::CreateCanonicalizeCompileAndReplicateAttributesPass());
+        mlir::TF::CreateCanonicalizeCompileAndReplicateAttributesPass());
     // Create TPU Compile and TPU Execute ops for each TPU devices.
     pm->addPass(mlir::TFTPU::CreateTPURewritePass());
     // Convert unified compilation and replication attributes back to legacy

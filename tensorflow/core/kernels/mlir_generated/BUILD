@@ -11,14 +11,14 @@ load(
     "//tensorflow:tensorflow.bzl",
     "if_cuda_or_rocm",
 )
-load("//tensorflow:tensorflow.bzl", "tf_cuda_cc_test")  # buildifier: disable=same-origin-load
-load("//tensorflow:tensorflow.bzl", "tf_kernel_library")  # buildifier: disable=same-origin-load
+load("//tensorflow:tensorflow.default.bzl", "tf_cuda_cc_test", "tf_kernel_library")
 load(
     "//tensorflow/core/platform:build_config_root.bzl",
     "tf_cuda_tests_tags",
 )
 
 package(
+    # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
     default_visibility = [
         "//tensorflow/core/kernels:__subpackages__",
     ],
@@ -28,7 +28,7 @@ package(
 package_group(
     name = "friends",
     packages = [
-        "//third_party/car/...",
+        "//waymo/...",
     ],
 )
 
@@ -128,14 +128,12 @@ tf_kernel_library(
     tags = ["manual"],
     deps = if_mlir_generated_gpu_kernels_enabled([
         ":base_gpu_op",
-        ":gpu_abs_kernels",
         ":gpu_acos_kernels",
         ":gpu_acosh_kernels",
         ":gpu_angle_kernels",
         ":gpu_asin_kernels",
         ":gpu_asinh_kernels",
         ":gpu_atan_kernels",
-        ":gpu_atanh_kernels",
         ":gpu_ceil_kernels",
         ":gpu_complex_abs_kernels",
         ":gpu_conj_kernels",
@@ -171,7 +169,16 @@ tf_kernel_library(
         ":gpu_tan_kernels",
         ":gpu_tanh_kernels",
         "//third_party/eigen3",
-    ]),
+    ]) + if_mlir_generated_experimental_kernels_enabled(
+        [
+            ":gpu_abs_kernels_experimental",
+            ":gpu_atanh_kernels_experimental",
+        ],
+        [
+            ":gpu_abs_kernels",
+            ":gpu_atanh_kernels",
+        ],
+    ),
 )
 
 tf_kernel_library(
@@ -601,6 +608,24 @@ gpu_kernel_library(
 )
 
 gpu_kernel_library(
+    name = "gpu_abs_kernels_experimental",
+    jit_i64_indexed_for_large_tensors_types = [
+        "f16",
+        "f32",
+        "f64",
+        "i64",
+    ],
+    jit_types = [
+        "i8",
+        "i16",
+    ],
+    op = "abs",
+    tile_size = "256",
+    types = [],
+    unroll_factors = "4",
+)
+
+gpu_kernel_library(
     name = "gpu_acos_kernels",
     op = "acos",
     tile_size = "256",
@@ -688,18 +713,21 @@ gpu_kernel_library(
     unroll_factors = "4",
 )
 
-# TODO: enable when supported in the pipeline
-# gpu_kernel_library(
-#     name = "gpu_atanh_kernels_experimental",
-#     op = "atanh",
-#     tile_size = "256",
-#     types = [
-#         "f32",
-#         "f64",
-#     ],
-#     unroll_factors = "4",
-#     jit_i64_indexed_for_large_tensors_types = ["f16"],
-# )
+gpu_kernel_library(
+    name = "gpu_atanh_kernels_experimental",
+    jit_i64_indexed_for_large_tensors_types = [
+        "f16",
+        "f32",
+        "f64",
+    ],
+    op = "atanh",
+    test_tags = [
+        "noasan",  # TODO(b/248071004): JIT-compiled code will not be instrumented.
+    ],
+    tile_size = "256",
+    types = [],
+    unroll_factors = "4",
+)
 
 gpu_kernel_library(
     name = "gpu_conj_kernels",
@@ -1004,6 +1032,9 @@ gpu_kernel_library(
         "i8",
         "ui32",
         "ui64",
+        "f16",
+        "f32",
+        "f64",
     ],
     op = "truncate_div",
     tile_size = "1024",

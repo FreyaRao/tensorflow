@@ -52,6 +52,9 @@ namespace quant {
 
 namespace {
 
+using QuantMethod =
+    tensorflow::quantization::QuantizationMethod::ExperimentalMethod;
+
 // Applies prepare quantization on the model in TF dialect. This pass runs
 // before the quantization pass and propagate the quantization parameters
 // across ops. This step is necessary for post-training quantization and also
@@ -73,10 +76,11 @@ class PrepareQuantizePass
     quant_specs_.inference_type = tensorflow::DT_QINT8;
   }
 
-  explicit PrepareQuantizePass(QuantizationMethod quantization_method) {
+  explicit PrepareQuantizePass(QuantMethod quantization_method) {
     quant_specs_.inference_type = tensorflow::DT_QINT8;
     enable_post_training_quantize_ =
-        (quantization_method == QuantizationMethod::kPostTrainingQuantization);
+        (quantization_method ==
+         tensorflow::quantization::QuantizationMethod::STATIC_RANGE);
   }
 
   PrepareQuantizePass(const PrepareQuantizePass& other) {
@@ -204,9 +208,8 @@ bool PrepareQuantizePass::SetInputNodesQuantizationParams(func::FuncOp func) {
         if (!min_max.first.has_value() || !min_max.second.has_value()) return;
 
         TypeAttr params = quant::GetQuantizedTypeAttr(
-            builder, input_type,
-            builder.getF64FloatAttr(min_max.first.getValue()),
-            builder.getF64FloatAttr(min_max.second.getValue()),
+            builder, input_type, builder.getF64FloatAttr(min_max.first.value()),
+            builder.getF64FloatAttr(min_max.second.value()),
             /*quant_dim=*/-1, num_bits, narrow_range, is_signed);
         builder.setInsertionPoint(block, insertion_point);
         auto q_op = builder.create<quantfork::QuantizeCastOp>(
@@ -311,6 +314,40 @@ void PrepareQuantizePass::SanityCheckAndAdjustment(func::FuncOp func) {
   });
 }
 
+// Merges consecutive QuantizeCast ops. For example, the following case:
+// %1 = tf.QuantizeCastOp(%0) : f32 -> qtype1
+// %2 = tf.QuantizeCastOp(%1) : qtype1 -> qtype2
+// %3 = tf.QuantizedOp1(%1)
+// %4 = tf.QuantizedOp2(%2)
+// will be tranformed to:
+// %1 = tf.QuantizeCastOp(%0) : f32 -> qtype1
+// %2 = tf.QuantizeCastOp(%0) : f32 -> qtype2
+// %3 = tf.QuantizedOp1(%1)
+// %4 = tf.QuantizedOp2(%2)
+// Converting from f32 -> qtype1 -> qtype2 will add unexpected quantization
+// lost for %2. This pattern avoids that by converting from f32 -> qtype2
+// directly.
+class MergeConsecutiveQuantizeCast
+    : public mlir::OpRewritePattern<quantfork::QuantizeCastOp> {
+ public:
+  explicit MergeConsecutiveQuantizeCast(MLIRContext* context)
+      : OpRewritePattern<quantfork::QuantizeCastOp>(context) {}
+
+ private:
+  LogicalResult matchAndRewrite(quantfork::QuantizeCastOp q_op,
+                                PatternRewriter& rewriter) const override {
+    auto preceding_qcast =
+        q_op.getArg().getDefiningOp<quantfork::QuantizeCastOp>();
+    if (!preceding_qcast) return failure();
+
+    auto new_qcast = rewriter.create<quantfork::QuantizeCastOp>(
+        q_op.getLoc(), q_op.getType(), preceding_qcast.getArg());
+    new_qcast->setAttr(kVolatileOpAttrName, rewriter.getUnitAttr());
+    q_op->replaceAllUsesWith(new_qcast);
+    return success();
+  }
+};
+
 bool PrepareQuantizePass::ContainsQuantizeOps(func::FuncOp func) {
   for (const auto& op : func.getOps()) {
     if (llvm::isa<quantfork::DequantizeCastOp>(op)) return true;
@@ -355,7 +392,7 @@ void PrepareQuantizePass::runOnOperation() {
 
   // During the legalization, unsigned quantized type is used, so we have to
   // convert all of them to signed.
-  RewritePatternSet patterns(&getContext());
+  RewritePatternSet patterns(ctx);
   populateWithGenerated(patterns);
   patterns.add<quant::ConvertUnsignedToSigned<quantfork::QuantizeCastOp>>(ctx);
   // Convert quant stats to int8 quantization parameters.
@@ -372,13 +409,17 @@ void PrepareQuantizePass::runOnOperation() {
       func, is_signed, disable_per_channel_ || quant_specs_.disable_per_channel,
       GetTFOpQuantSpec, GetTfQuantScaleSpec, infer_tensor_range,
       quant_specs_.legacy_float_scale);
+
+  RewritePatternSet patterns2(ctx);
+  patterns2.add<MergeConsecutiveQuantizeCast>(ctx);
+  (void)applyPatternsAndFoldGreedily(func, std::move(patterns2));
 }
 
 }  // namespace
 
 // Creates an instance of the TensorFlow dialect PrepareQuantize pass.
 std::unique_ptr<OperationPass<func::FuncOp>> CreatePrepareQuantizePass(
-    QuantizationMethod quantization_method) {
+    QuantMethod quantization_method) {
   return std::make_unique<PrepareQuantizePass>(quantization_method);
 }
 

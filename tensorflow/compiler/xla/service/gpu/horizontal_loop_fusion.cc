@@ -22,11 +22,14 @@ limitations under the License.
 
 #include "absl/container/flat_hash_set.h"
 #include "absl/types/span.h"
+#include "tensorflow/compiler/xla/hlo/ir/hlo_casting_utils.h"
+#include "tensorflow/compiler/xla/hlo/ir/hlo_instruction.h"
+#include "tensorflow/compiler/xla/hlo/ir/hlo_instructions.h"
 #include "tensorflow/compiler/xla/layout_util.h"
 #include "tensorflow/compiler/xla/service/gpu/gpu_fusible.h"
 #include "tensorflow/compiler/xla/service/hlo_creation_utils.h"
 #include "tensorflow/compiler/xla/xla_data.pb.h"
-#include "tensorflow/core/platform/errors.h"
+#include "tensorflow/tsl/platform/errors.h"
 
 namespace xla {
 namespace gpu {
@@ -100,6 +103,16 @@ class HorizontalLoopFusionImpl {
 };  // HorizontalLoopFusionImpl
 
 bool IsFusibleCandidate(const HloInstruction& instr) {
+  // For now, we do not support fusing instruction with control flow.
+  if (!instr.control_successors().empty() ||
+      !instr.control_predecessors().empty()) {
+    return false;
+  }
+
+  if (IsNestableVariadicReduction(instr)) {
+    return false;
+  }
+
   // Require no further check for element-wise instructions.
   if (instr.IsElementwise() && instr.operand_count() > 0) {
     return true;
@@ -370,8 +383,12 @@ Status HorizontalLoopFusionImpl::CreateFusedComputation(
                                 ->fused_instructions_computation()
                                 ->MakeInstructionPostOrder();
     for (HloInstruction* old_instr : def_to_use_order) {
-      if (old_instr->opcode() == HloOpcode::kParameter) {
-        // Parameters have been created.
+      if (old_instr->opcode() == HloOpcode::kParameter ||
+          (old_instr->opcode() == HloOpcode::kTuple &&
+           old_instr == fused_fusion_instrs[i]->fused_expression_root())) {
+        // Parameters have been created, and we don't need tuples from
+        // multi-output fusions, as we will directly reference the tuple
+        // operands instead by using GetOutputsOfFusible().
         continue;
       }
       std::vector<HloInstruction*> new_opnds;
@@ -403,7 +420,7 @@ Status HorizontalLoopFusionImpl::CreateFusedComputation(
       if (new_output->shape().dimensions_size() == 1) {
         instr_outputs[j] = new_output;
       } else {
-        Shape new_shape = ShapeUtil::MakeShapeWithLayout(
+        Shape new_shape = ShapeUtil::MakeShapeWithDenseLayout(
             new_output->shape().element_type(),
             {ShapeUtil::ElementsIn(new_output->shape())},
             /*minor_to_major=*/std::vector<int64_t>(1, 0));
@@ -495,6 +512,9 @@ Status HorizontalLoopFusionImpl::Fuse(
         computation_->ReplaceInstruction(fused_instr, bitcast_or_tuple));
     TF_RETURN_IF_ERROR(module->RemoveEmbeddedComputation(old_computation));
   }
+
+  TF_RETURN_IF_ERROR(Cast<HloFusionInstruction>(hori_fusion_instr)
+                         ->DeduplicateFusionOperands());
 
   VLOG(1) << "Fused " << fused_fusion_instrs.size()
           << " instructions into: " << hori_fusion_instr->ToString();

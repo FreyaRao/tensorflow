@@ -1,10 +1,11 @@
-load("//tensorflow:tensorflow.bzl", "pytype_strict_library")
+load("//tensorflow:pytype.default.bzl", "pytype_strict_library")
 load("//tensorflow:tensorflow.bzl", "py_test", "tf_py_test")
-load("//tensorflow:tensorflow.bzl", "cuda_py_test")
-load("//tensorflow/tsl/platform/default:distribute.bzl", "distribute_py_test")
+load("//tensorflow:tensorflow.default.bzl", "cuda_py_test")
+load("//tensorflow/core/platform:distribute.bzl", "distribute_py_test")
 load("//tensorflow/python/tpu:tpu.bzl", "tpu_py_test")
 
 package(
+    # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
     default_visibility = [
         "//tensorflow:internal",
         "//third_party/py/keras:__subpackages__",  # TODO(scottzhu): remove this once keras is relying on tf.__internal__.
@@ -129,6 +130,7 @@ py_library(
         "//tensorflow/python/distribute/coordinator:cluster_coordinator",
         "//tensorflow/python/distribute/experimental",
         "//tensorflow/python/distribute/failure_handling:failure_handling_lib",
+        "//tensorflow/python/distribute/failure_handling:preemption_watcher",
     ],
 )
 
@@ -636,7 +638,6 @@ py_library(
         ":tpu_util",
         ":tpu_values",
         ":values",
-        "//tensorflow/compiler/xla/experimental/xla_sharding",
         "//tensorflow/python:array_ops",
         "//tensorflow/python:constant_op",
         "//tensorflow/python:control_flow_ops",
@@ -651,6 +652,7 @@ py_library(
         "//tensorflow/python:variables",
         "//tensorflow/python/autograph/core",
         "//tensorflow/python/autograph/impl",
+        "//tensorflow/python/compiler/xla/experimental:xla_sharding",
         "//tensorflow/python/distribute/cluster_resolver:cluster_resolver_lib",
         "//tensorflow/python/distribute/v1:input_lib",
         "//tensorflow/python/eager:context",
@@ -696,6 +698,7 @@ distribute_py_test(
 tpu_py_test(
     name = "tpu_strategy_test",
     srcs = ["tpu_strategy_test.py"],
+    args = ["--tpu_use_tfrt=true"],
     disable_experimental = True,
     python_version = "PY3",
     tags = ["no_oss"],
@@ -830,6 +833,7 @@ py_library(
         "//tensorflow/python:variable_scope",
         "//tensorflow/python:variables",
         "//tensorflow/python/eager:context",
+        "//tensorflow/python/eager:tape",
         "//tensorflow/python/saved_model:save_context",
         "//tensorflow/python/trackable:base",
         "//tensorflow/python/training/saving:saveable_object",
@@ -938,12 +942,12 @@ py_library(
     srcs_version = "PY3",
     deps = [
         ":tpu_util",
-        "//tensorflow/compiler/xla/experimental/xla_sharding",
         "//tensorflow/python:control_flow_ops",
         "//tensorflow/python:resource_variable_ops_gen",
         "//tensorflow/python:tpu_partition_ops_gen",
         "//tensorflow/python:variable_scope",
         "//tensorflow/python:variables",
+        "//tensorflow/python/compiler/xla/experimental:xla_sharding",
         "//tensorflow/python/eager:context",
         "//tensorflow/python/framework:for_generated_wrappers",
         "//tensorflow/python/saved_model:save_context",
@@ -2257,6 +2261,7 @@ py_library(
         "//tensorflow/python:framework_ops",
         "//tensorflow/python:tensor_shape",
         "//tensorflow/python:tf_decorator",
+        "//tensorflow/python:util",
         "//tensorflow/python/eager:remote",
         "//tensorflow/python/trackable:base",
         "//tensorflow/python/training:server_lib",
@@ -2303,8 +2308,10 @@ distribute_py_test(
     name = "distributed_table_test",
     srcs = ["distributed_table_test.py"],
     python_version = "PY3",
+    shard_count = 12,
     tags = [
         "multi_and_single_gpu",
+        "no_oss",  # TODO(b/249822228)
         "noasan",  # TODO(b/237407459)
         "notpu",
         "notsan",  # Tsan failure doesn't seem to be caused by TF.
@@ -2316,6 +2323,7 @@ distribute_py_test(
         ":parameter_server_strategy_v2",
         ":ps_values",
         ":test_util",
+        "//tensorflow:tensorflow_py",
         "//tensorflow/python:dtypes",
         "//tensorflow/python:extra_py_tests_deps",
         "//tensorflow/python:lookup_ops",
@@ -2347,10 +2355,7 @@ tpu_py_test(
     disable_mlir_bridge = False,
     disable_v3_4chips = False,
     python_version = "PY3",
-    tags = [
-        "no_oss",
-        "notsan",  # b/239832964
-    ],
+    tags = ["no_oss"],
     deps = [
         ":distribute_lib",
         ":strategy_test_lib",
@@ -2367,6 +2372,7 @@ tpu_py_test(
         "//tensorflow/python/eager:test",
         "//tensorflow/python/framework:constant_op",
         "//tensorflow/python/framework:dtypes",
+        "//tensorflow/python/framework:summary_test_util",
         "//tensorflow/python/module",
         "//tensorflow/python/platform",
         "//tensorflow/python/tpu:device_assignment",

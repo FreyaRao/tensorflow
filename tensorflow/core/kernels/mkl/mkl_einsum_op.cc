@@ -101,7 +101,7 @@ struct MklEinsumHelper {
     if (lhs.NumElements() == 0 || rhs.NumElements() == 0) {
       functor::SetZeroFunctor<Device, T> f;
       f(ctx->eigen_device<Device>(), output->flat<T>());
-      return Status::OK();
+      return OkStatus();
     }
 
     // Compute parameters for DNNL matmul primitive.
@@ -130,7 +130,7 @@ struct MklEinsumHelper {
       TF_RETURN_IF_ERROR(EinsumHelper::ReshapeToRank3(
           *output, bcast.output_batch_size(), &output_reshaped));
     }
-    return Status::OK();
+    return OkStatus();
   }
 };
 
@@ -278,9 +278,7 @@ class MklEinsum : public OpKernel {
                               .TypeConstraint<TYPE>("T")                      \
                               .Label(mkl_op_registry::kMklNameChangeOpLabel), \
                           MklEinsum<CPUDevice, TYPE>)
-#ifdef ENABLE_MKL
 TF_CALL_float(REGISTER_EINSUM_MKL);
 TF_CALL_bfloat16(REGISTER_EINSUM_MKL);
-#endif  // ENABLE_MKL
 }  // namespace tensorflow
 #endif  // INTEL_MKL

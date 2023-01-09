@@ -30,14 +30,14 @@ limitations under the License.
 #include "absl/container/flat_hash_set.h"
 #include "absl/types/span.h"
 #include "tensorflow/compiler/xla/debug_options_flags.h"
+#include "tensorflow/compiler/xla/hlo/ir/dfs_hlo_visitor_with_default.h"
+#include "tensorflow/compiler/xla/hlo/ir/hlo_computation.h"
+#include "tensorflow/compiler/xla/hlo/ir/hlo_instruction.h"
+#include "tensorflow/compiler/xla/hlo/ir/hlo_instructions.h"
+#include "tensorflow/compiler/xla/hlo/ir/hlo_opcode.h"
 #include "tensorflow/compiler/xla/literal.h"
 #include "tensorflow/compiler/xla/literal_util.h"
-#include "tensorflow/compiler/xla/service/dfs_hlo_visitor_with_default.h"
-#include "tensorflow/compiler/xla/service/hlo_computation.h"
 #include "tensorflow/compiler/xla/service/hlo_creation_utils.h"
-#include "tensorflow/compiler/xla/service/hlo_instruction.h"
-#include "tensorflow/compiler/xla/service/hlo_instructions.h"
-#include "tensorflow/compiler/xla/service/hlo_opcode.h"
 #include "tensorflow/compiler/xla/service/pattern_matcher.h"
 #include "tensorflow/compiler/xla/service/shape_inference.h"
 #include "tensorflow/compiler/xla/shape_util.h"
@@ -47,11 +47,10 @@ limitations under the License.
 #include "tensorflow/compiler/xla/types.h"
 #include "tensorflow/compiler/xla/util.h"
 #include "tensorflow/compiler/xla/xla_data.pb.h"
-#include "tensorflow/core/lib/core/bitmap.h"
-#include "tensorflow/core/lib/core/errors.h"
-#include "tensorflow/core/lib/core/status.h"
-#include "tensorflow/core/lib/math/math_util.h"
+#include "tensorflow/tsl/lib/core/bitmap.h"
+#include "tensorflow/tsl/platform/errors.h"
 #include "tensorflow/tsl/platform/logging.h"
+#include "tensorflow/tsl/platform/status.h"
 
 namespace xla {
 
@@ -1120,6 +1119,22 @@ bool ConvolutionVisitor::CanPropagate(HloInstruction* consumer,
       if (!old_to_new_instrs_.contains(consumer->mutable_operand(0))) {
         found_good_non_window_dilated_conv = false;
       }
+      ConvolutionDimensionNumbers dim_numbers =
+          consumer->convolution_dimension_numbers();
+
+      ConvDetails c = GetConvolutionDetails(consumer, dim_numbers);
+
+      auto retval = GetSpatialDimsToSplit(consumer->mutable_operand(0));
+      std::vector<int64_t> new_spatial_dims = retval.second;
+
+      auto new_activations = old_to_new_instrs_[consumer->mutable_operand(0)];
+      // If low padding is large, there's no benefit in propagating. This
+      // also makes halo creation unnecessarily difficult (b/246862180).
+      if (new_activations->shape().dimensions(retval.second[0]) <
+          c.inherent_low_padding) {
+        return false;
+      }
+
       auto dim_map_val_op_0 = instr_to_dim_map_[consumer->mutable_operand(0)];
 
       if (!are_conv_dims_compatible(consumer->convolution_dimension_numbers(),
@@ -2208,7 +2223,7 @@ StatusOr<bool> ConvolutionVisitor::Propagate(HloInstruction* consumer,
             final_selection,
             MakePadHlo(final_selection, padding, padding_config));
 
-        tensorflow::core::Bitmap b(batch_size * (new_space_size + halo_size));
+        tsl::core::Bitmap b(batch_size * (new_space_size + halo_size));
         for (int k = 0; k < batch_size * (new_space_size + halo_size); ++k) {
           const int64_t space_index = k % (new_space_size + halo_size);
           const int64_t batch_index = (k / (new_space_size + halo_size));
@@ -2314,7 +2329,7 @@ StatusOr<HloInstruction*> ConvolutionVisitor::SelectValidPortion(
 
   // Build a constant PRED to decide which elements in the split dimension
   // are from halo.
-  tensorflow::core::Bitmap b(new_batch_size * total_new_space);
+  tsl::core::Bitmap b(new_batch_size * total_new_space);
   for (int k = 0; k < new_batch_size * total_new_space; ++k) {
     auto radix = ToMixedRadix(k, bounds);
 

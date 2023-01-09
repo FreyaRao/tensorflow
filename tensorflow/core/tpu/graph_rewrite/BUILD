@@ -7,6 +7,7 @@ load(
 )
 
 package(
+    # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
     default_visibility = [
         "//tensorflow/compiler:__subpackages__",
         "//tensorflow/compiler/xla/stream_executor/tpu:__subpackages__",
@@ -150,6 +151,7 @@ cc_library(
         "@com_google_absl//absl/types:span",
         "//tensorflow/compiler/jit:encapsulate_util",
         "//tensorflow/compiler/jit:shape_inference",
+        "//tensorflow/compiler/tf2xla:common",
         "//tensorflow/compiler/tf2xla:resource_operation_table",
         "//tensorflow/compiler/tf2xla:sharding_util",
         "//tensorflow/compiler/tf2xla:side_effect_util",
@@ -157,6 +159,8 @@ cc_library(
         "//tensorflow/compiler/tf2xla:xla_compiler",
         "//tensorflow/compiler/xla:array3d",
         "//tensorflow/compiler/xla:array4d",
+        "//tensorflow/compiler/xla:shape_util",
+        "//tensorflow/compiler/xla:xla_data_proto_cc",
         "//tensorflow/compiler/xla:xla_proto_cc",
         "//tensorflow/compiler/xla/client:sharding_builder",
         "//tensorflow/compiler/xla/service:computation_placer",
@@ -173,7 +177,7 @@ cc_library(
         "//tensorflow/core/tpu:tpu_compile_interface",
         "//tensorflow/core/tpu:tpu_defs",
         "//tensorflow/core/tpu:tpu_fingerprint_utils",
-        "//tensorflow/core/tpu:tpu_ops_c_api_hdrs",
+        "//tensorflow/compiler/xla/stream_executor/tpu:tpu_ops_c_api_hdrs",
         "//tensorflow/compiler/xla/stream_executor/tpu:tpu_platform_interface",
         "//tensorflow/compiler/xla/stream_executor/tpu:tpu_topology_external",
     ] + if_static(
@@ -269,6 +273,7 @@ cc_library(
     deps = [
         ":tpu_embedding_rewrite_pass_utils",
         "//tensorflow/compiler/xla:status_macros",
+        "//tensorflow/compiler/xla/stream_executor/tpu:tpu_ops_c_api_hdrs",
         "//tensorflow/core:core_cpu",
         "//tensorflow/core:core_cpu_internal",
         "//tensorflow/core:framework",
@@ -278,7 +283,6 @@ cc_library(
         "//tensorflow/core/platform:stream_executor",
         "//tensorflow/core/protobuf/tpu:tpu_embedding_configuration_proto_cc",
         "//tensorflow/core/tpu:tpu_embedding_optimization_parameters_utils",
-        "//tensorflow/core/tpu:tpu_ops_c_api_hdrs",
         "//tensorflow/core/tpu/ops:tpu_embedding_ops",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",

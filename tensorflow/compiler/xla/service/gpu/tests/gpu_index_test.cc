@@ -16,18 +16,18 @@ limitations under the License.
 #include <memory>
 #include <utility>
 
+#include "tensorflow/compiler/xla/hlo/ir/hlo_computation.h"
+#include "tensorflow/compiler/xla/hlo/ir/hlo_instruction.h"
+#include "tensorflow/compiler/xla/hlo/ir/hlo_module.h"
 #include "tensorflow/compiler/xla/literal.h"
 #include "tensorflow/compiler/xla/service/gpu/tests/gpu_codegen_test.h"
-#include "tensorflow/compiler/xla/service/hlo_computation.h"
-#include "tensorflow/compiler/xla/service/hlo_instruction.h"
-#include "tensorflow/compiler/xla/service/hlo_module.h"
 #include "tensorflow/compiler/xla/service/hlo_module_config.h"
 #include "tensorflow/compiler/xla/service/hlo_parser.h"
 #include "tensorflow/compiler/xla/shape_util.h"
 #include "tensorflow/compiler/xla/tests/hlo_test_base.h"
 #include "tensorflow/compiler/xla/xla.pb.h"
 #include "tensorflow/compiler/xla/xla_data.pb.h"
-#include "tensorflow/core/platform/test.h"
+#include "tensorflow/tsl/platform/test.h"
 
 namespace xla {
 namespace gpu {
@@ -156,7 +156,6 @@ TEST_F(GpuIndexTest, CompatibleUseLinearIndexWithReshapeAndBroadcast) {
 TEST_F(GpuIndexTest, CompatibleUseLinearIndexWithSizeOneDimensions) {
   HloModuleConfig config;
   auto debug_options = HloTestBase::GetDebugOptionsForTest();
-  debug_options.set_xla_gpu_max_kernel_unroll_factor(1);
   config.set_debug_options(debug_options);
 
   auto module = ParseAndReturnVerifiedModule(R"(
@@ -185,7 +184,6 @@ TEST_F(GpuIndexTest, CompatibleUseLinearIndexWithSizeOneDimensions) {
 TEST_F(GpuIndexTest, CompatibleUseLinearIndexWithTranspose) {
   HloModuleConfig config;
   auto debug_options = HloTestBase::GetDebugOptionsForTest();
-  debug_options.set_xla_gpu_max_kernel_unroll_factor(1);
   config.set_debug_options(debug_options);
 
   auto module = ParseAndReturnVerifiedModule(R"(

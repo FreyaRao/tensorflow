@@ -1,6 +1,7 @@
 # Description: this package contains shim library targets that forward
 # to the TF Lite C and C++ API targets.  See README.md.
 
+load("//tensorflow:tensorflow.default.bzl", "get_compatible_with_portable")
 load("//tensorflow/lite:build_def.bzl", "tflite_copts", "tflite_copts_warnings")
 load("//tensorflow/lite:special_rules.bzl", "tflite_portable_test_suite")
 load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
@@ -13,11 +14,28 @@ package(
 )
 
 exports_files(
-    srcs = ["c/c_api.h"],
+    srcs = [
+        "c/c_api.h",
+        "c/c_api_experimental.h",
+        "c/c_api_opaque.h",
+    ],
     visibility = [
         "//tensorflow/lite:__subpackages__",
         "@mediapipe//mediapipe/tasks:__subpackages__",
         "@org_tensorflow_lite_support//tensorflow_lite_support:__subpackages__",
+    ],
+)
+
+# Any target that depends on this one, directly or indirectly,
+# will have -DTFLITE_USE_OPAQUE_DELEGATE passed to the C/C++ compiler.
+cc_library(
+    name = "tflite_use_opaque_delegate",
+    compatible_with = get_compatible_with_portable(),
+    defines = [
+        "TFLITE_USE_OPAQUE_DELEGATE",
+    ],
+    visibility = [
+        "//visibility:public",
     ],
 )
 
@@ -27,7 +45,7 @@ exports_files(
 FRAMEWORK_STABLE_LIB_HDRS = [
     "//tensorflow/lite:allocation.h",
     "//tensorflow/lite:context_util.h",
-    "//tensorflow/lite:core/macros.h",
+    "//tensorflow/lite/core:macros.h",
     "//tensorflow/lite:error_reporter.h",
     "//tensorflow/lite:mutable_op_resolver.h",
     "//tensorflow/lite:op_resolver.h",
@@ -36,7 +54,7 @@ FRAMEWORK_STABLE_LIB_HDRS = [
 
 FRAMEWORK_LIB_HDRS = FRAMEWORK_STABLE_LIB_HDRS + [
     "//tensorflow/lite:context.h",
-    "//tensorflow/lite:core/subgraph.h",
+    "//tensorflow/lite/core:subgraph.h",
     "//tensorflow/lite:graph_info.h",
     "//tensorflow/lite:optional_debug_tools.h",
 ]
@@ -87,9 +105,9 @@ cc_library(
         "//tensorflow/lite:type_to_tflitetype",
         "//tensorflow/lite:util",
         "//tensorflow/lite:version",
-        "//tensorflow/lite/c:common",
         "//tensorflow/lite/core/api",
         "//tensorflow/lite/core/api:verifier",
+        "//tensorflow/lite/core/c:common",
         "//tensorflow/lite/experimental/resource",
         "//tensorflow/lite/schema:schema_fbs",
     ],
@@ -128,9 +146,10 @@ cc_library(
         "//tensorflow/lite:type_to_tflitetype",
         "//tensorflow/lite:util",
         "//tensorflow/lite:version",
-        "//tensorflow/lite/c:common",
+        "//tensorflow/lite/core:headers",
         "//tensorflow/lite/core/api",
         "//tensorflow/lite/core/api:verifier",
+        "//tensorflow/lite/core/c:common",
         "//tensorflow/lite/experimental/resource",
         "//tensorflow/lite/schema:schema_fbs",
     ],
@@ -164,9 +183,9 @@ cc_library(
         "//tensorflow/lite:type_to_tflitetype",
         "//tensorflow/lite:util",
         "//tensorflow/lite:version",
-        "//tensorflow/lite/c:common",
         "//tensorflow/lite/core/api",
         "//tensorflow/lite/core/api:verifier",
+        "//tensorflow/lite/core/c:common",
         "//tensorflow/lite/experimental/resource",
         "//tensorflow/lite/schema:schema_fbs",
     ],
@@ -194,9 +213,9 @@ cc_library(
         "//tensorflow/lite:type_to_tflitetype",
         "//tensorflow/lite:util",
         "//tensorflow/lite:version",
-        "//tensorflow/lite/c:common",
         "//tensorflow/lite/core/api",
         "//tensorflow/lite/core/api:verifier",
+        "//tensorflow/lite/core/c:common",
         "//tensorflow/lite/experimental/resource",
         "//tensorflow/lite/schema:schema_fbs",
     ],
@@ -220,7 +239,8 @@ cc_library(
     deps = [
         ":builtin_ops_list",
         "//tensorflow/lite:cc_api",
-        "//tensorflow/lite/c:common",
+        "//tensorflow/lite/core/c:common",
+        "//tensorflow/lite/core/kernels:builtin_ops",
         "//tensorflow/lite/kernels:builtin_ops",
     ],
 )
@@ -364,7 +384,19 @@ cc_library(
         "@mediapipe//mediapipe/tasks:__subpackages__",
         "@org_tensorflow_lite_support//tensorflow_lite_support:__subpackages__",
     ],
-    deps = ["//tensorflow/lite/c:c_api_experimental"],
+    deps = ["//tensorflow/lite/core/c:c_api_experimental"],
+)
+
+cc_library(
+    name = "c_api_types",
+    hdrs = ["c/c_api_types.h"],
+    copts = tflite_copts_warnings(),
+    visibility = [
+        "//tensorflow/lite:__subpackages__",
+        "@mediapipe//mediapipe/tasks:__subpackages__",
+        "@org_tensorflow_lite_support//tensorflow_lite_support:__subpackages__",
+    ],
+    deps = ["//tensorflow/lite/core/c:c_api_types"],
 )
 
 cc_library(
@@ -376,7 +408,9 @@ cc_library(
         "@mediapipe//mediapipe/tasks:__subpackages__",
         "@org_tensorflow_lite_support//tensorflow_lite_support:__subpackages__",
     ],
-    deps = ["//tensorflow/lite/c:common"],
+    deps = [
+        "//tensorflow/lite/core/c:common",
+    ],
 )
 
 cc_library(
@@ -388,7 +422,9 @@ cc_library(
         "@mediapipe//mediapipe/tasks:__subpackages__",
         "@org_tensorflow_lite_support//tensorflow_lite_support:__subpackages__",
     ],
-    deps = ["//tensorflow/lite/c:common"],
+    deps = [
+        "//tensorflow/lite/core/c:common",
+    ],
 )
 
 cc_library(
@@ -401,7 +437,7 @@ cc_library(
         "@org_tensorflow_lite_support//tensorflow_lite_support:__subpackages__",
     ],
     deps = [
-        "//tensorflow/lite/experimental/acceleration/configuration/c:delegate_plugin",
+        "//tensorflow/lite/core/experimental/acceleration/configuration/c:delegate_plugin",
     ],
 )
 
@@ -415,7 +451,7 @@ cc_library(
         "@org_tensorflow_lite_support//tensorflow_lite_support:__subpackages__",
     ],
     deps = [
-        "//tensorflow/lite/experimental/acceleration/configuration/c:gpu_plugin",
+        "//tensorflow/lite/core/experimental/acceleration/configuration/c:gpu_plugin",
     ],
 )
 
@@ -429,7 +465,7 @@ cc_library(
         "@org_tensorflow_lite_support//tensorflow_lite_support:__subpackages__",
     ],
     deps = [
-        "//tensorflow/lite/experimental/acceleration/configuration/c:nnapi_plugin",
+        "//tensorflow/lite/core/experimental/acceleration/configuration/c:nnapi_plugin",
     ],
 )
 
@@ -443,7 +479,7 @@ cc_library(
         "@org_tensorflow_lite_support//tensorflow_lite_support:__subpackages__",
     ],
     deps = [
-        "//tensorflow/lite/experimental/acceleration/configuration/c:xnnpack_plugin",
+        "//tensorflow/lite/core/experimental/acceleration/configuration/c:xnnpack_plugin",
     ],
 )
 

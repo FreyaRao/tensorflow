@@ -4,14 +4,16 @@
 # Throughout this file, all targets are built with the standard crosstool and
 # do not link against restricted binary blobs.
 
-# TODO(rdzhabarov): XLA should have its own tensorflow independent rule.
-load("//tensorflow/core/platform:build_config_root.bzl", "if_static")
-load("//tensorflow:tensorflow.bzl", "tf_cc_test", "tf_cuda_library")
-load("//tensorflow/core/platform:rules_cc.bzl", "cc_library")
-load("//tensorflow/core/platform:build_config.bzl", "tf_proto_library")
+load("//tensorflow/tsl/platform:build_config_root.bzl", "if_static")
+load("//tensorflow/tsl:tsl.bzl", "transitive_hdrs", "tsl_gpu_library")
+load("//tensorflow/tsl/platform:rules_cc.bzl", "cc_library")
+load("//tensorflow/tsl/platform:build_config.bzl", "tf_proto_library")
+load("//tensorflow/compiler/xla:xla.bzl", "xla_cc_test")
 load("//tensorflow/compiler/xla/stream_executor:build_defs.bzl", "stream_executor_friends")
+load("//tensorflow/tsl:tsl.default.bzl", "filegroup")
 
 package(
+    # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
     default_visibility = [
         ":friends",
     ],
@@ -59,11 +61,15 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":allocator_stats",
+        ":device_description_proto_cc",
         ":dnn_proto_cc",
         ":host_or_device_scalar",
         "//tensorflow/compiler/xla/stream_executor/lib",
         "//tensorflow/compiler/xla/stream_executor/platform",
+        "//tensorflow/tsl/platform:errors",
         "//tensorflow/tsl/platform:logging",
+        "//tensorflow/tsl/platform:status",
+        "//tensorflow/tsl/platform:types",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/memory",
         "@com_google_absl//absl/strings",
@@ -71,6 +77,11 @@ cc_library(
         "@com_google_absl//absl/types:optional",
         "@com_google_absl//absl/types:span",
     ],
+)
+
+transitive_hdrs(
+    name = "stream_executor_install_hdrs",
+    deps = [":stream_executor_headers"],
 )
 
 cc_library(
@@ -99,11 +110,19 @@ cc_library(
     ],
 )
 
+tf_proto_library(
+    name = "device_description_proto",
+    srcs = ["device_description.proto"],
+    cc_api_version = 2,
+    make_default_target_header_only = True,
+)
+
 cc_library(
     name = "device_description",
     srcs = ["device_description.cc"],
     hdrs = ["device_description.h"],
     deps = [
+        ":device_description_proto_cc",
         ":launch_dim",
         "//tensorflow/compiler/xla/stream_executor/lib",
         "//tensorflow/compiler/xla/stream_executor/platform",
@@ -153,7 +172,24 @@ cc_library(
 cc_library(
     name = "data_type",
     hdrs = ["data_type.h"],
-    deps = [":dnn_proto_cc"],
+    deps = [
+        ":dnn_proto_cc",
+        "//tensorflow/tsl/platform:float8",
+        "//tensorflow/tsl/protobuf:dnn_proto_cc",
+    ],
+)
+
+cc_library(
+    name = "device_id_utils",
+    hdrs = ["device_id_utils.h"],
+    deps = [
+        ":platform",
+        ":stream_executor",
+        "//tensorflow/tsl/framework:device_id_impl",
+        "//tensorflow/tsl/lib/gtl:int_type",
+        "//tensorflow/tsl/platform:str_util",
+        "@com_google_absl//absl/strings",
+    ],
 )
 
 cc_library(
@@ -174,8 +210,9 @@ cc_library(
 tf_proto_library(
     name = "dnn_proto",
     srcs = ["dnn.proto"],
-    cc_api_version = 2,
     make_default_target_header_only = True,
+    protodeps = ["//tensorflow/tsl/protobuf:dnn_proto"],
+    exports = ["//tensorflow/tsl/protobuf:dnn_proto"],
 )
 
 cc_library(
@@ -216,6 +253,30 @@ cc_library(
 )
 
 cc_library(
+    name = "device_mem_allocator",
+    hdrs = [
+        "device_host_allocator.h",
+        "device_mem_allocator.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":stream_executor",
+        "//tensorflow/tsl/framework:allocator",
+        "//tensorflow/tsl/framework:device_id",
+        "//tensorflow/tsl/platform:macros",
+        "//tensorflow/tsl/profiler/lib:traceme",
+    ],
+)
+
+filegroup(
+    name = "device_mem_allocator_headers",
+    srcs = [
+        "device_host_allocator.h",
+        "device_mem_allocator.h",
+    ],
+)
+
+cc_library(
     name = "executor_cache",
     srcs = [
         "device_description.h",
@@ -247,9 +308,9 @@ cc_library(
         ":allocator_stats",
         ":data_type",
         ":device_description",
+        ":device_description_proto_cc",
         ":device_memory",
         ":device_options",
-        ":dnn_proto_cc",
         ":fft",
         ":kernel_cache_config",
         ":kernel_spec",
@@ -260,6 +321,7 @@ cc_library(
         "//tensorflow/compiler/xla/stream_executor/lib",
         "//tensorflow/compiler/xla/stream_executor/platform",
         "//tensorflow/tsl/platform:logging",
+        "//tensorflow/tsl/protobuf:dnn_proto_cc",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/memory",
         "@com_google_absl//absl/strings",
@@ -278,7 +340,7 @@ cc_library(
         ":stream_executor_headers",
         "//tensorflow/compiler/xla/stream_executor/lib",
         "//tensorflow/compiler/xla/stream_executor/platform",
-        "//tensorflow/core/platform:errors",
+        "//tensorflow/tsl/platform:errors",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/strings",
@@ -325,6 +387,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":device_description",
+        ":device_description_proto_cc",
         ":kernel_cache_config",
         ":platform",
         ":stream_executor_headers",
@@ -332,6 +395,7 @@ cc_library(
         "//tensorflow/compiler/xla/stream_executor/lib",
         "//tensorflow/compiler/xla/stream_executor/platform",
         "//tensorflow/tsl/platform:logging",
+        "//tensorflow/tsl/protobuf:dnn_proto_cc",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/memory",
         "@com_google_absl//absl/strings",
@@ -341,7 +405,7 @@ cc_library(
 )
 
 # It implements :stream_executor_pimpl_header
-tf_cuda_library(
+tsl_gpu_library(
     name = "stream_executor_pimpl",
     srcs = [
         "stream.cc",
@@ -368,8 +432,9 @@ tf_cuda_library(
         ":timer",
         "//tensorflow/compiler/xla/stream_executor/lib",
         "//tensorflow/compiler/xla/stream_executor/platform",
-        "//tensorflow/core:lib_internal",
         "//tensorflow/tsl/platform:logging",
+        "//tensorflow/tsl/protobuf:dnn_proto_cc",
+        "//tensorflow/tsl/util:env_var",
         "//third_party/eigen3",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/memory",
@@ -413,9 +478,9 @@ cc_library(
         ":allocator_stats",
         ":data_type",
         ":device_description",
+        ":device_description_proto_cc",
         ":device_memory",
         ":device_options",
-        ":dnn_proto_cc",
         ":fft",
         ":kernel_cache_config",
         ":kernel_spec",
@@ -428,6 +493,7 @@ cc_library(
         "//tensorflow/compiler/xla/stream_executor/lib",
         "//tensorflow/compiler/xla/stream_executor/platform",
         "//tensorflow/tsl/platform:logging",
+        "//tensorflow/tsl/protobuf:dnn_proto_cc",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/memory",
         "@com_google_absl//absl/strings",
@@ -453,7 +519,7 @@ cc_library(
     deps = [
         ":data_type",
         ":device_description",
-        ":dnn_proto_cc",
+        ":device_description_proto_cc",
         ":kernel_cache_config",
         ":platform",
         ":stream_executor_headers",
@@ -461,6 +527,7 @@ cc_library(
         "//tensorflow/compiler/xla/stream_executor/lib",
         "//tensorflow/compiler/xla/stream_executor/platform",
         "//tensorflow/tsl/platform:logging",
+        "//tensorflow/tsl/protobuf:dnn_proto_cc",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/synchronization",
@@ -473,11 +540,11 @@ cc_library(
     hdrs = ["blas.h"],
     deps = [
         ":data_type",
-        ":dnn_proto_cc",
         ":host_or_device_scalar",
         ":stream_executor_headers",
         "//tensorflow/compiler/xla/stream_executor/lib",
         "//tensorflow/compiler/xla/stream_executor/platform",
+        "//tensorflow/tsl/protobuf:dnn_proto_cc",
         "@com_google_absl//absl/strings",
     ],
 )
@@ -524,9 +591,9 @@ cc_library(
         ":blas",
         ":data_type",
         ":device_description",
+        ":device_description_proto_cc",
         ":device_memory",
         ":device_options",
-        ":dnn_proto_cc",
         ":fft",
         ":kernel_cache_config",
         ":kernel_spec",
@@ -538,6 +605,7 @@ cc_library(
         "//tensorflow/compiler/xla/stream_executor/lib",
         "//tensorflow/compiler/xla/stream_executor/platform",
         "//tensorflow/tsl/platform:logging",
+        "//tensorflow/tsl/protobuf:dnn_proto_cc",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/memory",
         "@com_google_absl//absl/strings",
@@ -572,19 +640,22 @@ cc_library(
     hdrs = ["dnn.h"],
     deps = [
         ":data_type",
+        ":device_description_proto_cc",
         ":device_memory",
         ":dnn_proto_cc",
         ":stream_executor_headers",
+        "@com_google_absl//absl/algorithm:container",
+        "@com_google_absl//absl/container:btree",
         "@com_google_absl//absl/container:flat_hash_map",
-        "@com_google_absl//absl/hash",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/types:optional",
         "@com_google_absl//absl/types:span",
         "//tensorflow/tsl/platform:logging",
-        "//tensorflow/core/lib/strings:proto_serialization",
+        "//tensorflow/tsl/lib/strings:proto_serialization",
         "//tensorflow/compiler/xla/stream_executor/lib",
         "//tensorflow/compiler/xla/stream_executor/platform",
+        "//tensorflow/tsl/protobuf:dnn_proto_cc",
     ] + if_static(["@com_google_protobuf//:protobuf"]),
 )
 
@@ -657,7 +728,13 @@ cc_library(
         "timer.h",
         "trace_listener.h",
     ],
-    deps = [":stream_executor_headers"] + if_static([":stream_executor_impl"]),
+    deps = [
+        ":stream_executor_headers",
+        "//tensorflow/tsl/platform:errors",
+        "//tensorflow/tsl/platform:logging",
+        "//tensorflow/tsl/platform:status",
+        "//tensorflow/tsl/platform:types",
+    ] + if_static([":stream_executor_impl"]),
 )
 
 cc_library(
@@ -675,6 +752,7 @@ cc_library(
         ":stream_executor_pimpl",
         ":timer",
         "//tensorflow/compiler/xla/stream_executor:dnn_proto_cc_impl",
+        "//tensorflow/tsl/protobuf:dnn_proto_cc_impl",
     ],
 )
 
@@ -686,8 +764,8 @@ cc_library(
         ":platform",
         ":stream_executor",
         "//tensorflow/compiler/xla/stream_executor/lib",
-        "//tensorflow/core/platform:errors",
-        "//tensorflow/core/platform:status",
+        "//tensorflow/tsl/platform:errors",
+        "//tensorflow/tsl/platform:status",
         "//tensorflow/tsl/platform:types",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/synchronization",
@@ -708,15 +786,26 @@ cc_library(
     ],
 )
 
-tf_cc_test(
+xla_cc_test(
     name = "stream_test",
     size = "small",
     srcs = ["stream_test.cc"],
     deps = [
         ":stream_executor",
         "//tensorflow/compiler/xla/stream_executor/host:host_platform",
-        "//tensorflow/core:test",
-        "//tensorflow/core:test_main",
+        "//tensorflow/tsl/platform:test",
+        "//tensorflow/tsl/platform:test_main",
+    ],
+)
+
+xla_cc_test(
+    name = "dnn_test",
+    size = "small",
+    srcs = ["dnn_test.cc"],
+    deps = [
+        ":dnn",
+        "//tensorflow/tsl/platform:test",
+        "//tensorflow/tsl/platform:test_main",
     ],
 )
 
@@ -730,8 +819,8 @@ cc_library(
         ":platform",
         ":stream_executor_headers",
         "//tensorflow/compiler/xla/stream_executor/lib",
-        "//tensorflow/core/framework:allocator",
-        "//tensorflow/core/platform:errors",
+        "//tensorflow/tsl/framework:allocator",
+        "//tensorflow/tsl/platform:errors",
         "@com_google_absl//absl/synchronization",
     ],
 )
@@ -754,5 +843,22 @@ alias(
 
 alias(
     name = "rocm_platform",
-    actual = "//tensorflow/stream_executor/rocm:all_runtime",
+    actual = "//tensorflow/compiler/xla/stream_executor/rocm:all_runtime",
+)
+
+# TODO(se-owner): document or remove this.
+cc_library(
+    name = "stream_executor_bundle",
+    deps = [
+        ":dnn",
+        ":event",
+        ":multi_platform_manager",
+        ":scratch_allocator",
+        ":stream_executor",
+        "//tensorflow/compiler/xla/stream_executor/cuda:cuda_platform_id",
+        "//tensorflow/compiler/xla/stream_executor/host:host_platform",
+        "//tensorflow/compiler/xla/stream_executor/host:host_platform_id",
+        "//tensorflow/compiler/xla/stream_executor/platform:dso_loader",
+        "//tensorflow/compiler/xla/stream_executor/rocm:rocm_platform_id",
+    ],
 )

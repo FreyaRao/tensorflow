@@ -15,35 +15,17 @@ limitations under the License.
 #ifndef TENSORFLOW_COMPILER_MLIR_QUANTIZATION_TENSORFLOW_PYTHON_QUANTIZE_MODEL_WRAPPER_H_
 #define TENSORFLOW_COMPILER_MLIR_QUANTIZATION_TENSORFLOW_PYTHON_QUANTIZE_MODEL_WRAPPER_H_
 
-#include <pybind11/stl.h>
-
 #include <string>
+#include <unordered_set>
+#include <utility>
+#include <vector>
 
+#include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
-#include "pybind11/pybind11.h"
-#include "pybind11/stl.h"
-#include "tensorflow/python/lib/core/pybind11_lib.h"
+#include "tensorflow/compiler/mlir/quantization/tensorflow/exported_model.pb.h"
 
 namespace tensorflow {
 namespace quantization {
-
-PyObject* QuantizeQatModel(absl::string_view saved_model_path,
-                           absl::string_view exported_names_str,
-                           absl::string_view tags,
-                           absl::string_view quant_opts_serialized);
-
-PyObject* QuantizePtqDynamicRange(absl::string_view saved_model_path,
-                                  absl::string_view exported_names_str,
-                                  absl::string_view tags,
-                                  absl::string_view quant_opts_serialized);
-
-PyObject* QuantizePtqModelPreCalibration(absl::string_view saved_model_path,
-                                         absl::string_view exported_names_str,
-                                         absl::string_view tags);
-
-PyObject* QuantizePtqModelPostCalibration(
-    absl::string_view saved_model_path, absl::string_view exported_names_str,
-    absl::string_view tags, absl::string_view quant_opts_serialized);
 
 void ClearCollectedInformationFromCalibrator();
 

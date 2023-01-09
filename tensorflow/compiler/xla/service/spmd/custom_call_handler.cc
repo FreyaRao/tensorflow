@@ -22,14 +22,14 @@ limitations under the License.
 #include "absl/strings/str_cat.h"
 #include "tensorflow/compiler/xla/client/lib/comparators.h"
 #include "tensorflow/compiler/xla/client/xla_builder.h"
+#include "tensorflow/compiler/xla/hlo/ir/hlo_casting_utils.h"
+#include "tensorflow/compiler/xla/hlo/ir/hlo_computation.h"
+#include "tensorflow/compiler/xla/hlo/ir/hlo_instruction.h"
+#include "tensorflow/compiler/xla/hlo/ir/hlo_instructions.h"
+#include "tensorflow/compiler/xla/hlo/ir/hlo_sharding.h"
 #include "tensorflow/compiler/xla/literal_util.h"
 #include "tensorflow/compiler/xla/service/custom_call_sharding_helper.h"
-#include "tensorflow/compiler/xla/service/hlo_casting_utils.h"
-#include "tensorflow/compiler/xla/service/hlo_computation.h"
-#include "tensorflow/compiler/xla/service/hlo_instruction.h"
-#include "tensorflow/compiler/xla/service/hlo_instructions.h"
 #include "tensorflow/compiler/xla/service/hlo_lexer.h"
-#include "tensorflow/compiler/xla/service/hlo_sharding.h"
 #include "tensorflow/compiler/xla/service/hlo_sharding_util.h"
 #include "tensorflow/compiler/xla/service/shape_inference.h"
 #include "tensorflow/compiler/xla/service/spmd/spmd_partitioner.h"
@@ -83,11 +83,6 @@ Status SpmdPartitioningVisitor::HandleCustomCallTopK(HloInstruction* hlo) {
   const int64_t batch_dim = 0;
   const int64_t sort_dim = 1;
   const int64_t shard_count = sharding.tile_assignment().dim(sort_dim);
-
-  if (shard_count <= 1) {
-    return DefaultAction(hlo);
-  }
-
   const int64_t batch_dim_partition = sharding.tile_assignment().dim(batch_dim);
   const int64_t input_size = hlo->operand(0)->shape().dimensions(sort_dim);
   const int64_t batch_size = hlo->shape().tuple_shapes(0).dimensions(batch_dim);
@@ -171,7 +166,7 @@ Status SpmdPartitioningVisitor::HandleCustomCallTopK(HloInstruction* hlo) {
   index_gte = b_.AddInstruction(HloInstruction::CreateBinary(
       index_offset->shape(), HloOpcode::kAdd, index_gte, index_offset));
   index_gte->set_sharding(sharding);
-  // Parttion GetTupleElement of index.
+  // Partition GetTupleElement of index.
   PartitionedHlo index_partitioned_gte(
       index_gte, partitioned_topk.base_shape().tuple_shapes(1),
       MakePartitioningState());

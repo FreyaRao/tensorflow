@@ -36,6 +36,7 @@ limitations under the License.
 #include "mlir/IR/OpDefinition.h"  // from @llvm-project
 #include "mlir/Support/LLVM.h"  // from @llvm-project
 #include "mlir/Transforms/Passes.h"  // from @llvm-project
+#include "stablehlo/dialect/Register.h"  // from @stablehlo
 #include "tensorflow/compiler/mlir/tensorflow/dialect_registration.h"
 #include "tensorflow/compiler/mlir/tensorflow/ir/tf_executor.h"
 #include "tensorflow/compiler/mlir/tensorflow/ir/tf_ops.h"
@@ -48,24 +49,24 @@ limitations under the License.
 #include "tensorflow/compiler/mlir/tensorflow/utils/convert_tensor.h"
 #include "tensorflow/compiler/mlir/tensorflow/utils/convert_type.h"
 #include "tensorflow/compiler/mlir/tensorflow/utils/dump_mlir_util.h"
+#include "tensorflow/compiler/mlir/tensorflow/utils/dynamic_shape_utils.h"
 #include "tensorflow/compiler/mlir/tensorflow/utils/error_util.h"
 #include "tensorflow/compiler/mlir/tensorflow/utils/serialize_mlir_module_utils.h"
 #include "tensorflow/compiler/mlir/tensorflow/utils/translate_utils.h"
-#include "tensorflow/compiler/mlir/xla/layout_util.h"
-#include "tensorflow/compiler/mlir/xla/mlir_hlo_to_hlo.h"
 #include "tensorflow/compiler/mlir/xla/transforms/adjust_layout.h"
 #include "tensorflow/compiler/mlir/xla/transforms/passes.h"
-#include "tensorflow/compiler/mlir/xla/type_to_shape.h"
 #include "tensorflow/compiler/tf2xla/layout_util.h"
 #include "tensorflow/compiler/tf2xla/shape_util.h"
 #include "tensorflow/compiler/tf2xla/type_util.h"
 #include "tensorflow/compiler/tf2xla/xla_helpers.h"
-#include "tensorflow/compiler/xla/mlir_hlo/include/mlir-hlo/Dialect/mhlo/IR/hlo_ops.h"
-#include "tensorflow/compiler/xla/mlir_hlo/include/mlir-hlo/Dialect/mhlo/IR/register.h"
-#include "tensorflow/compiler/xla/mlir_hlo/include/mlir-hlo/Dialect/mhlo/transforms/passes.h"
-#include "tensorflow/compiler/xla/mlir_hlo/stablehlo/stablehlo/dialect/Register.h"
-#include "tensorflow/compiler/xla/service/hlo_sharding.h"
+#include "tensorflow/compiler/xla/hlo/ir/hlo_sharding.h"
+#include "tensorflow/compiler/xla/mlir_hlo/mhlo/IR/hlo_ops.h"
+#include "tensorflow/compiler/xla/mlir_hlo/mhlo/IR/register.h"
+#include "tensorflow/compiler/xla/mlir_hlo/mhlo/transforms/passes.h"
 #include "tensorflow/compiler/xla/shape.h"
+#include "tensorflow/compiler/xla/translate/mhlo_to_hlo/layout_util.h"
+#include "tensorflow/compiler/xla/translate/mhlo_to_hlo/mlir_hlo_to_hlo.h"
+#include "tensorflow/compiler/xla/translate/mhlo_to_hlo/type_to_shape.h"
 #include "tensorflow/compiler/xla/xla_data.pb.h"
 #include "tensorflow/core/framework/tensor_shape.h"
 #include "tensorflow/core/platform/error_payloads.h"
@@ -172,12 +173,12 @@ mlir::RankedTensorType GetBufferType(mlir::Type ty) {
                       .dyn_cast_or_null<mlir::mhlo::TypeExtensionsAttr>();
   if (encoding && !encoding.getBounds().empty()) {
     for (int64_t dim = 0; dim < rank; ++dim) {
-      if (dims[dim] == mlir::ShapedType::kDynamicSize) {
+      if (dims[dim] == mlir::ShapedType::kDynamic) {
         dims[dim] = encoding.getBounds()[dim];
       }
     }
   }
-  return mlir::RankedTensorType::get(dims, ranked_ty.getElementType());
+  return GetTypeFromTFTensorShape(dims, ranked_ty.getElementType());
 }
 
 // Calculates computation output shape and build OutputDescription for each
@@ -412,11 +413,14 @@ void CreateConvertMlirToXlaHloPipeline(
       mlir::TFDevice::CreateDecomposeResourceOpsPass());
   pm.addPass(mlir::TF::CreatePromoteResourcesToArgsPass());
   pm.addPass(mlir::createSymbolDCEPass());
+
+  // Sink constants to regions so that ops requiring constant operands can
+  // access the constant and there is no indirection through control flow region
+  // arguments. Also, note that this pass is in MHLO but it is generic and sinks
+  // constants for all ops with regions.
+  pm.addNestedPass<mlir::func::FuncOp>(
+      mlir::mhlo::createSinkConstantsToControlFlowPass());
   pm.addPass(mlir::TF::CreateTFShapeInferencePass());
-  // TODO(b/171426148): We cannot completely remove region to functional control
-  // flow conversion from this pipeline yet as it causes some unit tests to
-  // fail.
-  pm.addPass(mlir::TF::CreateTFRegionControlFlowToFunctional());
   // LegalizeTFControlFlow encapsulates arguments for control flow operations
   // with a tuple argument which break the assumption of resource lifting
   // inside PromoteResourcesToArgs.
@@ -441,6 +445,16 @@ void CreateConvertMlirToXlaHloPipeline(
   // inference was originally missing in a TF op but the corresponding HLO op
   // had static shape after lowering.
   pm.addPass(mlir::TF::CreateTFShapeInferencePass());
+
+  // Legalize any StableHLO ops to MHLO. Bridge still doesn't use StableHLO but
+  // such ops might be present in the input from upstream like TFRT compilation.
+  // Later on, this could be merged in the legalization pass when we migrate
+  // bridge to StableHLO.
+  //
+  // TODO(b/259459405): Avoid this peculiar use through some refactoring in
+  // the the caller.
+  pm.addPass(mlir::mhlo::createStablehloLegalizeToHloPass());
+
   // Run LegalizeTFPass again because the previous legalization passes can
   // expose more graph pruning and canonicalization opportunities that are
   // necessary for the second LegalizeTFPass(allow_partial_conversion=false)
@@ -720,14 +734,14 @@ static StatusOr<std::vector<int>> RewriteWithArgs(
       llvm::SmallVector<int64_t, 4> resource_subtype_shape(
           resource_shape.begin(), resource_shape.end());
       auto resource_subtype =
-          mlir::RankedTensorType::get(resource_subtype_shape, element_type);
+          GetTypeFromTFTensorShape(resource_subtype_shape, element_type);
       auto resource_type =
           mlir::TF::ResourceType::get({resource_subtype}, builder.getContext());
 
       auto tensor_type = mlir_arg.getType().cast<mlir::TensorType>();
       if (tensor_type.hasRank()) {
         mlir_arg.setType(
-            mlir::RankedTensorType::get(tensor_type.getShape(), resource_type));
+            GetTypeFromTFTensorShape(tensor_type.getShape(), resource_type));
       } else {
         mlir_arg.setType(mlir::UnrankedTensorType::get(resource_type));
       }

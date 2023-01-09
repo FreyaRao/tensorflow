@@ -24,8 +24,8 @@ limitations under the License.
 #define TFLITE_WITH_MULTITHREADED_EIGEN
 #endif
 
-#include "tensorflow/lite/c/builtin_op_data.h"
-#include "tensorflow/lite/c/common.h"
+#include "tensorflow/lite/core/c/builtin_op_data.h"
+#include "tensorflow/lite/core/c/common.h"
 #include "tensorflow/lite/kernels/cpu_backend_context.h"
 #if defined(TFLITE_WITH_MULTITHREADED_EIGEN)
 #include "tensorflow/lite/kernels/eigen_support.h"
@@ -189,12 +189,6 @@ bool IsIm2ColRequired(const TfLiteTensor* input, TfLiteConvParams* params,
   // Return early as basic requirement is not met
   if (!need_im2col) return false;
 
-  // Special case for Hybrid, as it supports only non-dilated im2col currently
-  const bool is_hybrid_non_dilated = is_hybrid && need_non_dilated_im2col;
-  const bool is_quantized = input->type == kTfLiteUInt8 ||
-                            input->type == kTfLiteInt8 ||
-                            input->type == kTfLiteInt16;
-
   switch (kernel_type) {
     case kReference:
       if (is_hybrid) {
@@ -204,13 +198,12 @@ bool IsIm2ColRequired(const TfLiteTensor* input, TfLiteConvParams* params,
       }
     case kGenericOptimized:
     case kCblasOptimized:
-      if (is_hybrid && !need_non_dilated_im2col) {
-        return false;
-      } else {
-        return true;
-      }
+      // `need_im2col` is always satisfied.
+      return true;
     case kMultithreadOptimized:
-      if (is_hybrid_non_dilated || is_quantized ||
+      if (input->type == kTfLiteUInt8 ||  //
+          input->type == kTfLiteInt8 ||   //
+          input->type == kTfLiteInt16 ||  // quantized.
           !data->supports_multithreaded_kernel) {
         return true;
       } else {
@@ -603,6 +596,8 @@ TfLiteStatus Prepare(KernelType kernel_type, TfLiteContext* context,
       const auto* affine_quantization =
           reinterpret_cast<TfLiteAffineQuantization*>(
               filter->quantization.params);
+      TF_LITE_ENSURE(context, affine_quantization);
+      TF_LITE_ENSURE(context, affine_quantization->scale);
       TF_LITE_ENSURE_EQ(
           context, affine_quantization->scale->size,
           filter->dims->data[affine_quantization->quantized_dimension]);

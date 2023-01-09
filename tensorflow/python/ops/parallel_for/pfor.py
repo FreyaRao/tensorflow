@@ -1077,10 +1077,13 @@ def _wrap_and_tile_variants(tensor, length):
   return wrap(tensor)
 
 
-def _fallback_converter(pfor_input, root_cause="", warn=True):
+def _fallback_converter(pfor_input, root_cause="", warn=False):
+  msg = ("Using a while_loop for converting "
+         f"{pfor_input.op_type} cause {root_cause}")
   if warn:
-    logging.warning("Using a while_loop for converting %s cause %s",
-                    pfor_input.op_type, root_cause)
+    logging.warning(msg)
+  else:
+    logging.debug(msg)
   output_dtypes = [x.dtype for x in pfor_input.outputs]
   iters = pfor_input.pfor.loop_len_vector[0]
 
@@ -2832,7 +2835,7 @@ def _convert_clip_by_value(pfor_input):
   t = pfor_input.stacked_input(0)
   clip_value_min = pfor_input.unstacked_input(1)
   clip_value_max = pfor_input.unstacked_input(2)
-  return wrap(gen_math_ops.clip_by_value(t, clip_value_min, clip_value_max),
+  return wrap(gen_math_ops._clip_by_value(t, clip_value_min, clip_value_max),
               True)
 
 

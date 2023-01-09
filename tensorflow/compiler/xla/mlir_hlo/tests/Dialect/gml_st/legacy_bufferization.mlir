@@ -11,9 +11,9 @@ func.func private @some_use(memref<?xf32>)
 // CHECK-SAME:    %[[A:[a-zA-Z0-9]*]]: memref<?xf32>
 // CHECK-SAME:    %[[B:[a-zA-Z0-9]*]]: memref<?xf32>
 // CHECK-SAME:    %[[c:[a-zA-Z0-9]*]]: memref<f32>
-func.func @tiled_dot(%A: tensor<?xf32> {bufferization.writeable = false},
-                %B: tensor<?xf32> {bufferization.writeable = false},
-                %c: tensor<f32> {bufferization.writeable = true},
+func.func @tiled_dot(%A: tensor<?xf32> {bufferization.writable = false},
+                %B: tensor<?xf32> {bufferization.writable = false},
+                %c: tensor<f32> {bufferization.writable = true},
                 %effecting: memref<?xf32>) -> tensor<f32> {
   %c3 = arith.constant 3 : index
   %c0 = arith.constant 0 : index
@@ -27,7 +27,7 @@ func.func @tiled_dot(%A: tensor<?xf32> {bufferization.writeable = false},
        ins (%arg4 = %A: tensor<?xf32>, %use = %effecting : memref<?xf32>,
             %arg5 = %B: tensor<?xf32>)
        outs (%arg6 = %c: tensor<f32>)
-       iterators["reduction"] {
+       iterators[#gml_st.iterator_type<reduction>] {
     // CHECK-NOT:   alloc
 
     %2 = tensor.dim %arg4, %c0 : tensor<?xf32>
@@ -42,7 +42,7 @@ func.func @tiled_dot(%A: tensor<?xf32> {bufferization.writeable = false},
     //     CHECK:   %[[SV_B:.*]] = memref.subview {{.*}}
     %7 = tensor.extract_slice %arg5[%arg3] [%6] [1] : tensor<?xf32> to tensor<?xf32>
 
-    //     CHECK:   linalg.dot ins(%[[SV_A]], %[[SV_B]] : memref<?xf32, #map{{[0-9]}}>, memref<?xf32, #map{{[0-9]}}>) outs(%{{.*}} : memref<f32>)
+    //     CHECK:   linalg.dot ins(%[[SV_A]], %[[SV_B]] : memref<?xf32, strided{{.*}}>, memref<?xf32, strided<{{.*}}>>) outs(%{{.*}} : memref<f32>)
     %8 = linalg.dot ins(%4, %7 : tensor<?xf32>, tensor<?xf32>)
                     outs(%arg6 : tensor<f32>) -> tensor<f32>
 
@@ -65,7 +65,7 @@ func.func @tiled_dot(%A: tensor<?xf32> {bufferization.writeable = false},
 
 //      CHECK:  func @tiled_fill(
 // CHECK-SAME:    %[[A:[a-zA-Z0-9]*]]: memref<?xf32>
-func.func @tiled_fill(%A: tensor<?xf32> {bufferization.writeable = true}) -> tensor<?xf32> {
+func.func @tiled_fill(%A: tensor<?xf32> {bufferization.writable = true}) -> tensor<?xf32> {
   %c3 = arith.constant 3 : index
   %c0 = arith.constant 0 : index
   %f0 = arith.constant 0.0 : f32
@@ -75,7 +75,8 @@ func.func @tiled_fill(%A: tensor<?xf32> {bufferization.writeable = true}) -> ten
 
   //     CHECK: gml_st.loop {{.*}} to (%[[M]]) {{.*}} outs{{.*}}%[[A]]
   %1 = gml_st.loop (%arg3) = (%c0) to (%0) step (%c3)
-      outs (%arg1 = %A: tensor<?xf32>) iterators["parallel"] {
+      outs (%arg1 = %A: tensor<?xf32>)
+      iterators[#gml_st.iterator_type<parallel>] {
     // CHECK-NOT:   alloc
 
     %2 = tensor.dim %arg1, %c0 : tensor<?xf32>
@@ -84,7 +85,7 @@ func.func @tiled_fill(%A: tensor<?xf32> {bufferization.writeable = true}) -> ten
     //     CHECK:   %[[SV_A:.*]] = memref.subview {{.*}}
     %4 = tensor.extract_slice %arg1[%arg3] [%3] [1] : tensor<?xf32> to tensor<?xf32>
 
-    //     CHECK:   linalg.fill ins(%{{.*}}: f32) outs(%[[SV_A]] : memref<?xf32, #map{{[0-9]}}>)
+    //     CHECK:   linalg.fill ins(%{{.*}}: f32) outs(%[[SV_A]] : memref<?xf32, strided{{.*}}>)
     %5 = linalg.fill ins(%f0: f32) outs(%4: tensor<?xf32>)
       -> tensor<?xf32>
     %6 = tensor.insert_slice %5 into %arg1[%arg3] [%3] [1] : tensor<?xf32> into tensor<?xf32>
@@ -105,8 +106,8 @@ func.func @tiled_fill(%A: tensor<?xf32> {bufferization.writeable = true}) -> ten
 // CHECK-SAME:    %[[A:[a-zA-Z0-9]*]]: memref<?xf32>
 // CHECK-SAME:    %[[B:[a-zA-Z0-9]*]]: memref<?xf32>
 func.func @tiled_loop_yield_out_of_place(
-    %A: tensor<?xf32> {bufferization.writeable = true},
-    %B: tensor<?xf32> {bufferization.writeable = true}) -> tensor<?xf32> {
+    %A: tensor<?xf32> {bufferization.writable = true},
+    %B: tensor<?xf32> {bufferization.writable = true}) -> tensor<?xf32> {
   %c3 = arith.constant 3 : index
   %c0 = arith.constant 0 : index
   %f0 = arith.constant 0.0 : f32
@@ -117,7 +118,7 @@ func.func @tiled_loop_yield_out_of_place(
   //     CHECK: gml_st.loop {{.*}} to (%[[M]]) {{.*}} outs{{.*}}%[[A]]
   %1 = gml_st.loop (%arg3) = (%c0) to (%0) step (%c3)
       outs (%arg1 = %A: tensor<?xf32>)
-      iterators["parallel"]
+      iterators[#gml_st.iterator_type<parallel>]
   {
     // CHECK-NOT:   alloc
     //     CHECK:   memref.copy %[[B]], %[[A]]

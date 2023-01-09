@@ -1,7 +1,7 @@
 # Description:
 # TensorFlow SavedModel.
 
-load("//tensorflow:tensorflow.bzl", "filegroup")
+load("//tensorflow:tensorflow.default.bzl", "filegroup")
 load("//tensorflow/core/platform:rules_cc.bzl", "cc_library")
 load(
     "//tensorflow:tensorflow.bzl",
@@ -17,6 +17,7 @@ load(
 )
 
 package(
+    # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
     default_visibility = ["//visibility:public"],
     licenses = ["notice"],
 )
@@ -62,7 +63,7 @@ cc_library(
         # tf_lib depending on the build platform.
         "@com_google_absl//absl/memory:memory",
         "//tensorflow/core:lib",
-        "//tensorflow/core/util/tensor_bundle",
+        "//tensorflow/core/util/tensor_bundle:byteswaptensor",
     ]),
 )
 
@@ -121,6 +122,7 @@ cc_library(
     hdrs = ["loader.h"],
     deps = [
         ":constants",
+        ":fingerprinting",
         ":loader_util",
         ":reader",
     ] + if_not_mobile([
@@ -142,6 +144,7 @@ cc_library(
     hdrs = ["bundle_v2.h"],
     deps = [
         ":constants",
+        ":fingerprinting",
         ":metrics",
         ":reader",
         ":util",
@@ -149,6 +152,7 @@ cc_library(
         "//tensorflow/core:protos_all_cc",
         "//tensorflow/core/platform:strcat",
         "//tensorflow/core/util/tensor_bundle",
+        "//tensorflow/core/util/tensor_bundle:byteswaptensor",
         "@com_google_absl//absl/container:flat_hash_set",
     ],
 )
@@ -267,6 +271,7 @@ filegroup(
         "testdata/VarsAndArithmeticObjectGraph/**",
         "testdata/fuzz_generated/**",
         "testdata/SimpleV1Model/**",
+        "testdata/OptimizerSlotVariableModule/**",
     ]),
 )
 
@@ -320,6 +325,7 @@ cc_library(
     visibility = [
         "//tensorflow:__pkg__",
         "//tensorflow/python:__pkg__",
+        "//tensorflow/security/fuzzing/cc/ops:__pkg__",  # TODO(b/261455394): Remove.
     ],
     deps = if_not_mobile(["//tensorflow/core:lib"]) + if_android(["//tensorflow/core:portable_tensorflow_lib_lite"]),
     alwayslink = True,
@@ -378,6 +384,7 @@ cc_library(
     visibility = [
         "//tensorflow:__pkg__",
         "//tensorflow/python:__pkg__",
+        "//tensorflow/security/fuzzing/cc/ops:__pkg__",  # TODO(b/261455394): Remove.
     ],
     deps = [
         ":constants",

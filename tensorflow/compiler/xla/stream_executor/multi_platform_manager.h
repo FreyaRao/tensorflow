@@ -31,7 +31,7 @@ limitations under the License.
 //   port::StatusOr<Platform*> platform_status =
 //      se::MultiPlatformManager::PlatformWithName("OpenCL");
 //   if (!platform_status.ok()) { ... }
-//   Platform* platform = platform_status.ValueOrDie();
+//   Platform* platform = platform_status.value();
 //   LOG(INFO) << platform->VisibleDeviceCount() << " devices visible";
 //   if (platform->VisibleDeviceCount() <= 0) { return; }
 //
@@ -43,7 +43,7 @@ limitations under the License.
 //                 << ": " << executor_status.status();
 //       continue;
 //     }
-//     LOG(INFO) << "found usable executor: " << executor_status.ValueOrDie();
+//     LOG(INFO) << "found usable executor: " << executor_status.value();
 //   }
 //
 // A few things to note:
@@ -85,7 +85,7 @@ class MultiPlatformManager {
   // already registered. The associated listener, if not null, will be used to
   // trace events for ALL executors for that platform.
   // Takes ownership of platform.
-  static port::Status RegisterPlatform(std::unique_ptr<Platform> platform);
+  static tsl::Status RegisterPlatform(std::unique_ptr<Platform> platform);
 
   // Retrieves the platform registered with the given platform name (e.g.
   // "CUDA", "OpenCL", ...) or id (an opaque, comparable value provided by the
@@ -156,7 +156,7 @@ class MultiPlatformManager {
   };
   // Registers a listeners to receive notifications about certain events.
   // Precondition: No Platform has been registered yet.
-  static port::Status RegisterListener(std::unique_ptr<Listener> listener);
+  static tsl::Status RegisterListener(std::unique_ptr<Listener> listener);
 };
 
 }  // namespace stream_executor

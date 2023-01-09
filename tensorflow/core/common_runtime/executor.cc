@@ -73,6 +73,7 @@ limitations under the License.
 #include "tensorflow/core/profiler/lib/annotated_traceme.h"
 #include "tensorflow/core/profiler/lib/connected_traceme.h"
 #include "tensorflow/core/profiler/lib/scoped_annotation.h"
+#include "tensorflow/core/profiler/lib/traceme.h"
 #include "tensorflow/core/profiler/lib/traceme_encode.h"
 #include "tensorflow/core/protobuf/error_codes.pb.h"
 #include "tensorflow/core/util/determinism.h"
@@ -384,7 +385,7 @@ class ExecutorState {
   const ImmutableExecutorState& immutable_state_;
   ExecutorImpl::KernelStats* const kernel_stats_;
   CancellationManager* cancellation_manager_;
-  CoordinationServiceAgent* coordination_service_agent_;
+  tsl::CoordinationServiceAgent* coordination_service_agent_;
   absl::optional<ManagedStackTrace> stack_trace_ = absl::nullopt;
   // If not null, use this device to schedule intra-op operation
   std::unique_ptr<DeviceBase> user_device_;
@@ -691,20 +692,8 @@ void ExecutorState<PropagatorStateType>::ProcessConstTensor(
 template <class PropagatorStateType>
 void ExecutorState<PropagatorStateType>::Process(TaggedNode tagged_node,
                                                  int64_t scheduled_nsec) {
-  profiler::TraceMeConsumer activity(
-      // From TraceMeProducer in DirectSession::RunInternal,
-      // GraphMgr::ExecuteAsync, or FunctionLibraryRuntime::Run.
-      [&] {
-        // NOTE: This tracing uses the iteration number from the first tagged
-        // node that executes during this call to `Process()`. In principle,
-        // subsequent nodes could have different values of `iter_num` that
-        // will not be traced.
-        return profiler::TraceMeEncode(
-            "ExecutorState::Process",
-            {{"id", step_id_}, {"iter_num", tagged_node.get_iter_num()}});
-      },
-      profiler::ContextType::kTfExecutor, step_id_,
-      profiler::TraceMeLevel::kInfo);
+  profiler::TraceMe traceme("ExecutorState::Process Scheduled",
+                            profiler::TraceMeLevel::kVerbose);
   TaggedNodeReadyQueue inline_ready;
   inline_ready.push_back(tagged_node);
   return ProcessInline(&inline_ready, scheduled_nsec);
@@ -777,8 +766,29 @@ void ExecutorState<PropagatorStateType>::ProcessInline(
   EntryVector outputs(1);
 
   bool completed = false;
+  int64_t last_iter_num = -1;
+  std::unique_ptr<profiler::TraceMeConsumer> iteration_scope;
   while (!inline_ready->empty()) {
     TaggedNode tagged_node = inline_ready->front();
+
+    int64_t current_iter_num = tagged_node.get_iter_num();
+    if (current_iter_num != last_iter_num) {
+      iteration_scope = std::make_unique<profiler::TraceMeConsumer>(
+          // From TraceMeProducer in DirectSession::RunInternal,
+          // GraphMgr::ExecuteAsync, or FunctionLibraryRuntime::Run.
+          [&] {
+            // NOTE: This tracing uses the iteration number from the first
+            // tagged node that executes during this call to `Process()`. In
+            // principle, subsequent nodes could have different values of
+            // `iter_num` that will not be traced.
+            return profiler::TraceMeEncode(
+                "ExecutorState::Process",
+                {{"id", step_id_}, {"iter_num", tagged_node.get_iter_num()}});
+          },
+          profiler::ContextType::kTfExecutor, step_id_,
+          profiler::TraceMeLevel::kInfo);
+      last_iter_num = current_iter_num;
+    }
     inline_ready->pop_front();
     const NodeItem& item = tagged_node.get_node_item();
     const int id = item.node_id;
@@ -1177,11 +1187,17 @@ bool ExecutorState<PropagatorStateType>::NodeDone(
       TRACEPRINTF("StartAbort: %s", s.ToString().c_str());
       if (cancellation_manager_) {
         // Only log when the abort happens during the actual run time.
-        // Use VLOG instead of LOG(warning) because error status is expected
-        // when the executor is run under the grappler optimization phase or
-        // when iterating through a tf.data input pipeline.
-        VLOG(1) << "[" << immutable_state_.params().device->name()
-                << "] Executor start aborting: " << s;
+        // Use LOG(INFO) instead of LOG(WARNING) because error status is
+        // expected when the executor is run under the grappler optimization
+        // phase. Do not log OutOfRange erros because they are expected when
+        // iterating through a tf.data input pipeline.
+        if (!errors::IsOutOfRange(s)) {
+          LOG(INFO) << "[" << immutable_state_.params().device->name()
+                    << "] Executor start aborting: " << s;
+        } else {
+          VLOG(1) << "[" << immutable_state_.params().device->name()
+                  << "] Executor start aborting: " << s;
+        }
       }
 
       if (rendezvous_) {

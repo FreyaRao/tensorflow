@@ -48,8 +48,6 @@ namespace gpu {
 
 PLUGIN_REGISTRY_DEFINE_PLUGIN_ID(kRocBlasPlugin);
 
-namespace wrap = tensorflow::wrap;
-
 template <class T>
 const typename RocBlasTypeConversionHelper<T>::mapped_type *complex_cast(
     const DeviceMemory<T> &a) {
@@ -428,7 +426,7 @@ port::Status ROCMBlas::DoBlasGemm(Stream *stream, blas::Transpose transa,
   switch (dtype) {
     case blas::DataType::kHalf: {
       port::StatusOr<bool> maybe_hasXDLOPS = GpuDriver::GetMFMASupport();
-      if (maybe_hasXDLOPS.ok() && maybe_hasXDLOPS.ValueOrDie()) {
+      if (maybe_hasXDLOPS.ok() && maybe_hasXDLOPS.value()) {
         VLOG(1) << "Using rocblas_gemm_ex";
         return DoBlasInternalStatus(
             wrap::rocblas_gemm_ex, stream, /* pointer_mode_host = */ true,
@@ -704,7 +702,7 @@ port::Status ReorganizeMemory(Stream *stream,
     return port::Status(
         port::error::INTERNAL,
         "failed to copy device memory in ROCMBlas::DoBlasGemmBatched");
-  return port::Status::OK();
+  return tsl::OkStatus();
 }
 
 template <typename T>
@@ -739,7 +737,7 @@ port::Status ROCMBlas::AllocateStridedBuffer(
     *device_memory = DeviceMemory<MAPPED_T>(
         DeviceMemoryBase(raw_ptrs[0], matrix_batch_byte_size));
     reallocated = false;
-    return port::Status::OK();
+    return tsl::OkStatus();
   }
 
   if (scratch_allocator != nullptr) {
@@ -760,7 +758,7 @@ port::Status ROCMBlas::AllocateStridedBuffer(
   if (copy_data)
     return ReorganizeMemory(stream, device_memory, raw_ptrs, batch_count,
                             batch_stride, true);
-  return port::Status::OK();
+  return tsl::OkStatus();
 }
 
 template <typename T, typename FuncT>
@@ -817,7 +815,7 @@ port::Status ROCMBlas::DoBlasGemmBatchedInternal(
   port::Status a_allocation_status = AllocateStridedBuffer<T>(
       a_raw_ptrs, batch_count, batch_stride_a, scratch_allocator, stream,
       &a_temp, &a, true, reallocated_a);
-  if (a_allocation_status != port::Status::OK()) {
+  if (a_allocation_status != tsl::OkStatus()) {
     return a_allocation_status;
   }
 
@@ -826,7 +824,7 @@ port::Status ROCMBlas::DoBlasGemmBatchedInternal(
   port::Status b_allocation_status = AllocateStridedBuffer<T>(
       b_raw_ptrs, batch_count, batch_stride_b, scratch_allocator, stream,
       &b_temp, &b, true, reallocated_b);
-  if (b_allocation_status != port::Status::OK()) {
+  if (b_allocation_status != tsl::OkStatus()) {
     return b_allocation_status;
   }
 
@@ -835,7 +833,7 @@ port::Status ROCMBlas::DoBlasGemmBatchedInternal(
   port::Status c_allocation_status = AllocateStridedBuffer<T>(
       c_raw_ptrs, batch_count, batch_stride_c, scratch_allocator, stream,
       &c_temp, &c, true, reallocated_c);  // can disable copy if beta=0
-  if (c_allocation_status != port::Status::OK()) {
+  if (c_allocation_status != tsl::OkStatus()) {
     return c_allocation_status;
   }
 
@@ -843,19 +841,31 @@ port::Status ROCMBlas::DoBlasGemmBatchedInternal(
   MAPPED_T *beta_ptr = reinterpret_cast<MAPPED_T *>(&beta);
 
   bool ok;
-  ok = DoBlasInternal(rocblas_func, stream, /* pointer_mode_host = */ true,
-                      ROCMBlasTranspose(transa), ROCMBlasTranspose(transb), m,
-                      n, k, GpuComplex(alpha_ptr), GpuMemory(a), lda,
-                      batch_stride_a, GpuMemory(b), ldb, batch_stride_b,
-                      GpuComplex(beta_ptr), GpuMemoryMutable(&c), ldc,
-                      batch_stride_c, batch_count);
+  if constexpr (std::is_same<T, Eigen::bfloat16>::value) {
+    ok = DoBlasInternal(
+        rocblas_func, stream, /* pointer_mode_host = */ true,
+        ROCMBlasTranspose(transa), ROCMBlasTranspose(transb), m, n, k,
+        GpuComplex(alpha_ptr), GpuMemory(a), rocblas_datatype_bf16_r, lda,
+        batch_stride_a, GpuMemory(b), rocblas_datatype_bf16_r, ldb,
+        batch_stride_b, GpuComplex(beta_ptr), GpuMemoryMutable(&c),
+        rocblas_datatype_bf16_r, ldc, batch_stride_c, GpuMemoryMutable(&c),
+        rocblas_datatype_bf16_r, ldc, batch_stride_c, batch_count,
+        rocblas_datatype_f32_r, rocblas_gemm_algo_standard, 0, 0);
+  } else {
+    ok = DoBlasInternal(rocblas_func, stream, /* pointer_mode_host = */ true,
+                        ROCMBlasTranspose(transa), ROCMBlasTranspose(transb), m,
+                        n, k, GpuComplex(alpha_ptr), GpuMemory(a), lda,
+                        batch_stride_a, GpuMemory(b), ldb, batch_stride_b,
+                        GpuComplex(beta_ptr), GpuMemoryMutable(&c), ldc,
+                        batch_stride_c, batch_count);
+  }
   if (!ok)
     return port::Status(port::error::INTERNAL,
                         "failed BLAS call, see log for details");
   if (reallocated_c)
     return ReorganizeMemory(stream, &c, c_raw_ptrs, batch_count, batch_stride_c,
                             false);
-  return port::Status::OK();
+  return tsl::OkStatus();
 }
 
 bool ROCMBlas::DoBlasGemmBatched(
@@ -877,6 +887,27 @@ bool ROCMBlas::DoBlasGemmBatched(
     LOG(ERROR) << status;
   }
 
+  return status.ok();
+}
+
+bool ROCMBlas::DoBlasGemmBatched(
+    Stream *stream, blas::Transpose transa, blas::Transpose transb, uint64_t m,
+    uint64_t n, uint64 k, float alpha,
+    const absl::Span<DeviceMemory<Eigen::bfloat16> *const> &a_array, int lda,
+    const absl::Span<DeviceMemory<Eigen::bfloat16> *const> &b_array, int ldb,
+    float beta, const absl::Span<DeviceMemory<Eigen::bfloat16> *const> &c_array,
+    int ldc, int batch_count, ScratchAllocator *scratch_allocator) {
+  blas_log("DoBlasGemmBatched");
+  const Eigen::bfloat16 alpha_bf16(alpha);
+  const Eigen::bfloat16 beta_bf16(beta);
+
+  port::Status status = DoBlasGemmBatchedInternal(
+      wrap::rocblas_gemm_strided_batched_ex, stream, transa, transb, m, n, k,
+      alpha_bf16, a_array, lda, b_array, ldb, beta_bf16, c_array, ldc,
+      batch_count, scratch_allocator);
+  if (!status.ok()) {
+    LOG(ERROR) << status;
+  }
   return status.ok();
 }
 

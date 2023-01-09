@@ -2,6 +2,7 @@ load("//tensorflow:tensorflow.bzl", "if_google", "if_oss", "tf_cc_test")
 load("//tensorflow/core/platform:rules_cc.bzl", "cc_library")
 
 package(
+    # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
     default_visibility = [":friends"],
     licenses = ["notice"],
 )
@@ -12,6 +13,7 @@ package_group(
         # copybara:uncomment "//learning/brain/experimental/tfrt/...",
         # copybara:uncomment "//learning/brain/research/pjrt/...",
         # copybara:uncomment "//learning/brain/tfrt/...",
+        "//smartass/brain/inference/...",
         # copybara:uncomment "//smartass/brain/ops/...",
         "//tensorflow/c/eager/...",
         "//tensorflow/compiler/mlir/tfrt/...",
@@ -136,6 +138,7 @@ cc_library(
     ],
     deps = [
         "//tensorflow/core/platform:status",
+        "@com_google_absl//absl/status",
         "@tf_runtime//:hostcontext",
         "@tf_runtime//:support",
     ],
@@ -301,5 +304,25 @@ cc_library(
     deps = [
         "//tensorflow/core:lib",
         "//tensorflow/core/platform:threadpool_interface",
+    ],
+)
+
+cc_library(
+    name = "device_variables_table",
+    hdrs = ["device_variables_table.h"],
+    deps = [
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/synchronization",
+        "@llvm-project//llvm:Support",
+        "@tf_runtime//:hostcontext",
+    ],
+)
+
+cc_library(
+    name = "gpu_variables_table",
+    hdrs = ["gpu_variables_table.h"],
+    deps = [
+        ":device_variables_table",
+        ":fallback_tensor",
     ],
 )

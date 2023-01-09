@@ -48,6 +48,11 @@ struct RocBlasTypeConversionHelper<Eigen::half> {
 };
 
 template <>
+struct RocBlasTypeConversionHelper<Eigen::bfloat16> {
+  using mapped_type = rocblas_bfloat16;
+};
+
+template <>
 struct RocBlasTypeConversionHelper<std::complex<float>> {
   using mapped_type = rocblas_float_complex;
 };
@@ -122,7 +127,7 @@ class ROCMBlas : public blas::BlasSupport {
     if (!DoBlasInternal(args...)) {
       return port::InternalError("Failed calling rocBLAS");
     }
-    return port::Status::OK();
+    return tsl::OkStatus();
   }
 
   template <typename FuncT, typename... Args>

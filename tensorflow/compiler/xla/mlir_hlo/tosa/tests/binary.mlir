@@ -7,6 +7,13 @@ func.func @add(%arg0 : tensor<10xf32>, %arg1 : tensor<10xf32>) -> tensor<10xf32>
   return %0 : tensor<10xf32>
 }
 
+// CHECK-LABEL: @and
+func.func @and(%arg0 : tensor<10xi32>, %arg1 : tensor<10xi32>) -> tensor<10xi32> {
+  // CHECK: tosa.bitwise_and
+  %0 = "mhlo.and"(%arg0, %arg1) : (tensor<10xi32>, tensor<10xi32>) -> tensor<10xi32>
+  return %0 : tensor<10xi32>
+}
+
 // CHECK-LABEL: @compare_eq
 func.func @compare_eq(%arg0 : tensor<10xf32>, %arg1 : tensor<10xf32>) -> tensor<10xi1> {
   // CHECK: tosa.equal
@@ -27,6 +34,28 @@ func.func @compare_ne(%arg0 : tensor<10xi32>, %arg1 : tensor<10xi32>) -> tensor<
   // CHECK-DAG: %[[VAR1:.*]] = "tosa.logical_not"(%[[VAR0]])
   %0 = "mhlo.compare"(%arg0, %arg1) {comparison_direction = #mhlo<comparison_direction NE>} : (tensor<10xi32>, tensor<10xi32>) -> tensor<10xi1>
   return %0 : tensor<10xi1>
+}
+
+// CHECK-LABEL: @concatenate
+func.func @concatenate(%arg0 : tensor<3x3xf32>, %arg1 : tensor<3x3xf32>) -> tensor<6x3xf32> {
+  // CHECK: "tosa.concat"(%arg0, %arg1) {axis = 0 : i64} : (tensor<3x3xf32>, tensor<3x3xf32>) -> tensor<6x3xf32>
+  %0 = "mhlo.concatenate"(%arg0, %arg1) {dimension = 0 : i64} : (tensor<3x3xf32>, tensor<3x3xf32>) -> tensor<6x3xf32>
+  return %0 : tensor<6x3xf32>
+}
+
+// CHECK-LABEL: @divide
+func.func @divide(%arg0 : tensor<10xi32>, %arg1 : tensor<10xi32>) -> tensor<10xi32> {
+  // CHECK: tosa.div
+  %0 = "mhlo.divide"(%arg0, %arg1) : (tensor<10xi32>, tensor<10xi32>) -> tensor<10xi32>
+  return %0 : tensor<10xi32>
+}
+
+// CHECK-LABEL: @divide_f32
+func.func @divide_f32(%arg0 : tensor<10xf32>, %arg1 : tensor<10xf32>) -> tensor<10xf32> {
+  // tosa.div only supports i32, so this should not legalize.
+  // CHECK: mhlo.divide
+  %0 = "mhlo.divide"(%arg0, %arg1) : (tensor<10xf32>, tensor<10xf32>) -> tensor<10xf32>
+  return %0 : tensor<10xf32>
 }
 
 // CHECK-LABEL: @dot_vector_vector
@@ -69,6 +98,40 @@ func.func @dot_matrix_matrix(%arg0 : tensor<2x3xf32>, %arg1 : tensor<3x4xf32>) -
   return %0 : tensor<2x4xf32>
 }
 
+// CHECK-LABEL: @gather
+func.func @gather(%arg0 : tensor<3x4x5xi32>, %arg1 : tensor<3x2xi32>) -> tensor<3x2x5xi32> {
+  // CHECK: tosa.gather
+  %0 = "mhlo.gather"(%arg0, %arg1) {
+    dimension_numbers = #mhlo.gather<
+      collapsed_slice_dims = [0],
+      index_vector_dim = 1,
+      offset_dims = [1, 2],
+      start_index_map = [0, 1]
+    >,
+    indices_are_sorted = false,
+    slice_sizes = dense<[1, 2, 5]> : tensor<3xi64>
+  } : (tensor<3x4x5xi32>, tensor<3x2xi32>) -> tensor<3x2x5xi32>
+  return %0 : tensor<3x2x5xi32>
+}
+
+// CHECK-LABEL: @gather_unranked
+func.func @gather_unranked(%arg0 : tensor<*xi32>, %arg1 : tensor<3x2xi32>) -> tensor<*xi32> {
+  // This lowering does not support unranked tensors, so this should not
+  // legalize.
+  // CHECK: mhlo.gather
+  %0 = "mhlo.gather"(%arg0, %arg1) {
+    dimension_numbers = #mhlo.gather<
+      collapsed_slice_dims = [0],
+      index_vector_dim = 1,
+      offset_dims = [1, 2],
+      start_index_map = [0, 1]
+    >,
+    indices_are_sorted = false,
+    slice_sizes = dense<[1, 2, 5]> : tensor<3xi64>
+  } : (tensor<*xi32>, tensor<3x2xi32>) -> tensor<*xi32>
+  return %0 : tensor<*xi32>
+}
+
 // CHECK-LABEL: @maximum
 func.func @maximum(%arg0 : tensor<10xf32>, %arg1 : tensor<10xf32>) -> tensor<10xf32> {
   // CHECK: tosa.maximum
@@ -83,10 +146,31 @@ func.func @maximum_f64(%arg0 : tensor<10xf64>, %arg1 : tensor<10xf64>) -> tensor
   return %0 : tensor<10xf64>
 }
 
+// CHECK-LABEL: @minimum
+func.func @minimum(%arg0 : tensor<10xf32>, %arg1 : tensor<10xf32>) -> tensor<10xf32> {
+  // CHECK: tosa.minimum
+  %0 = "mhlo.minimum"(%arg0, %arg1) : (tensor<10xf32>, tensor<10xf32>) -> tensor<10xf32>
+  return %0 : tensor<10xf32>
+}
+
 // CHECK-LABEL: @multiply
 func.func @multiply(%arg0 : tensor<10xf32>, %arg1 : tensor<10xf32>) -> tensor<10xf32> {
   // CHECK: tosa.mul
   %0 = "mhlo.multiply"(%arg0, %arg1) : (tensor<10xf32>, tensor<10xf32>) -> tensor<10xf32>
+  return %0 : tensor<10xf32>
+}
+
+// CHECK-LABEL: @or
+func.func @or(%arg0 : tensor<10xi32>, %arg1 : tensor<10xi32>) -> tensor<10xi32> {
+  // CHECK: tosa.bitwise_or
+  %0 = "mhlo.or"(%arg0, %arg1) : (tensor<10xi32>, tensor<10xi32>) -> tensor<10xi32>
+  return %0 : tensor<10xi32>
+}
+
+// CHECK-LABEL: @power
+func.func @power(%arg0 : tensor<10xf32>, %arg1 : tensor<10xf32>) -> tensor<10xf32> {
+  // CHECK: tosa.pow
+  %0 = "mhlo.power"(%arg0, %arg1) : (tensor<10xf32>, tensor<10xf32>) -> tensor<10xf32>
   return %0 : tensor<10xf32>
 }
 
@@ -114,9 +198,30 @@ func.func @reduce_sum(%arg0: tensor<5x4xf32>, %arg1: tensor<f32>) -> tensor<4xf3
   return %0 : tensor<4xf32>
 }
 
+// CHECK-LABEL: @shift_left
+func.func @shift_left(%arg0 : tensor<10xf32>, %arg1 : tensor<10xf32>) -> tensor<10xf32> {
+  // CHECK: tosa.logical_left_shift
+  %0 = "mhlo.shift_left"(%arg0, %arg1) : (tensor<10xf32>, tensor<10xf32>) -> tensor<10xf32>
+  return %0 : tensor<10xf32>
+}
+
+// CHECK-LABEL: @shift_right_logical
+func.func @shift_right_logical(%arg0 : tensor<10xf32>, %arg1 : tensor<10xf32>) -> tensor<10xf32> {
+  // CHECK: tosa.logical_right_shift
+  %0 = "mhlo.shift_right_logical"(%arg0, %arg1) : (tensor<10xf32>, tensor<10xf32>) -> tensor<10xf32>
+  return %0 : tensor<10xf32>
+}
+
 // CHECK-LABEL: @subtract
 func.func @subtract(%arg0 : tensor<10xf32>, %arg1 : tensor<10xf32>) -> tensor<10xf32> {
   // CHECK: tosa.sub
   %0 = "mhlo.subtract"(%arg0, %arg1) : (tensor<10xf32>, tensor<10xf32>) -> tensor<10xf32>
   return %0 : tensor<10xf32>
+}
+
+// CHECK-LABEL: @xor
+func.func @xor(%arg0 : tensor<10xi32>, %arg1 : tensor<10xi32>) -> tensor<10xi32> {
+  // CHECK: tosa.bitwise_xor
+  %0 = "mhlo.xor"(%arg0, %arg1) : (tensor<10xi32>, tensor<10xi32>) -> tensor<10xi32>
+  return %0 : tensor<10xi32>
 }

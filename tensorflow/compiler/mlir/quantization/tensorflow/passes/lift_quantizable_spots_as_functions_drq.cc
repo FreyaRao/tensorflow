@@ -16,7 +16,7 @@ limitations under the License.
 #include <utility>
 
 #include "llvm/ADT/StringRef.h"
-#include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"  // from @llvm-project
+#include "mlir/Dialect/Arith/IR/Arith.h"  // from @llvm-project
 #include "mlir/Dialect/Func/IR/FuncOps.h"  // from @llvm-project
 #include "mlir/IR/BuiltinOps.h"  // from @llvm-project
 #include "mlir/IR/Diagnostics.h"  // from @llvm-project
@@ -43,7 +43,7 @@ class LiftQuantizableSpotsAsFunctionsDRQPass
       LiftQuantizableSpotsAsFunctionsDRQPass)
 
   // Constructor used by the PassRegistration. This is only used by test.
-  explicit LiftQuantizableSpotsAsFunctionsDRQPass() {}
+  explicit LiftQuantizableSpotsAsFunctionsDRQPass() = default;
 
   // Constructor used by manually creating the pass.
   explicit LiftQuantizableSpotsAsFunctionsDRQPass(

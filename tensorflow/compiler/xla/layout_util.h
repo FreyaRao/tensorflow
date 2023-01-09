@@ -26,6 +26,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/layout.h"
 #include "tensorflow/compiler/xla/shape.h"
 #include "tensorflow/compiler/xla/status.h"
+#include "tensorflow/compiler/xla/xla_data.pb.h"
 
 namespace xla {
 
@@ -34,12 +35,16 @@ class LayoutUtil {
  public:
   // Creates a layout with the given minor-to-major dimension order. (This is a
   // convenience function for protobuf construction.)
-  static Layout MakeLayout(absl::Span<const int64_t> minor_to_major,
-                           absl::Span<const DimLevelType> dim_level_types = {},
-                           absl::Span<const Tile> tiles = {},
-                           int64_t element_size_in_bits = 0,
-                           int64_t memory_space = 0,
-                           std::optional<Shape> physical_shape = std::nullopt);
+  static Layout MakeLayout(
+      absl::Span<const int64_t> minor_to_major,
+      absl::Span<const DimLevelType> dim_level_types = {},
+      absl::Span<const bool> dim_unique = {},
+      absl::Span<const bool> dim_ordered = {},
+      absl::Span<const Tile> tiles = {},
+      PrimitiveType index_primitive_type = PRIMITIVE_TYPE_INVALID,
+      PrimitiveType pointer_primitive_type = PRIMITIVE_TYPE_INVALID,
+      int64_t memory_space = 0,
+      std::optional<Shape> physical_shape = std::nullopt);
 
   // Similar to MakeLayout, but take indices in reverse order.
   static Layout MakeLayoutFromMajorToMinor(
@@ -142,6 +147,8 @@ class LayoutUtil {
   // * R0 and R1: this is always trivially true.
   // * R2+: equivalent to row-major. Dimension 0 is the major, dimension 1 is
   //        more minor, and so on until dimension N-1 which is the minor.
+  //
+  // Returns `true` for "default", major-to-minor layouts (e.g. {3,2,1,0}).
   static bool IsMonotonicWithDim0Major(const Layout& layout);
 
   // Returns whether the given shape has a layout. For tuple shapes, true is
@@ -231,6 +238,15 @@ class LayoutUtil {
   // If the shape has a layout, returns the contained memory space.  Otherwise,
   // returns Layout::kDefaultMemorySpace.
   static int64_t MemorySpace(const Shape& shape);
+
+  static xla::DimLevelType GetDimLevelType(const Layout& layout, int64_t dim);
+  static bool DimUnique(const Layout& layout, int64_t dim);
+  static bool DimOrdered(const Layout& layout, int64_t dim);
+
+  // Return true iff the given DimLevelType and dim_unique/dim_ordered values
+  // represent a valid encoding.
+  static bool ValidateDimLevel(xla::DimLevelType dim_level_type,
+                               bool dim_unique, bool dim_ordered);
 
  private:
   LayoutUtil(const LayoutUtil&) = delete;

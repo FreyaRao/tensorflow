@@ -1,5 +1,6 @@
 # BUILD rules for NNAPI delegate compatibility checking.
 package(
+    # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
     default_visibility = [
         "//visibility:public",
     ],
@@ -18,6 +19,7 @@ cc_library(
         "//tensorflow/lite:framework_stable",
         "//tensorflow/lite:minimal_logging",
         "//tensorflow/lite/c:common",
+        "//tensorflow/lite/core/c:common",
         "//tensorflow/lite/delegates/nnapi:nnapi_delegate",
     ],
 )
@@ -28,8 +30,10 @@ cc_library(
     hdrs = [
         "nnapi_delegate_compatibility_checker.h",
     ],
+    copts = ["-DNNAPI_VERBOSE_VALIDATION"],
     deps = [
         "//tensorflow/lite:framework_stable",
+        "//tensorflow/lite:util",
         "//tensorflow/lite/delegates/nnapi:nnapi_delegate",
         "//tensorflow/lite/kernels:builtin_ops",
         "//tensorflow/lite/nnapi:nnapi_lib",
@@ -39,6 +43,7 @@ cc_library(
         "//tensorflow/lite/tools/delegates/compatibility/protos:compatibility_result_cc",
         "//tensorflow/lite/tools/versioning:op_signature",
         "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
     ],
 )
 
@@ -49,7 +54,7 @@ cc_test(
     ],
     deps = [
         ":nnapi_compatibility_lib",
-        "//tensorflow/lite/c:c_api_types",
+        "//tensorflow/lite/core/c:c_api_types",
         "//tensorflow/lite/kernels:test_util",
         "//tensorflow/lite/schema:schema_fbs",
         "@com_google_googletest//:gtest_main",

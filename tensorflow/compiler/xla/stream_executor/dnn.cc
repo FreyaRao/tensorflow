@@ -16,12 +16,15 @@ limitations under the License.
 #include "tensorflow/compiler/xla/stream_executor/dnn.h"
 
 #include <cstdint>
+#include <iterator>
 
-#include "absl/hash/hash.h"
+#include "absl/algorithm/container.h"
+#include "absl/container/btree_map.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/str_join.h"
-#include "tensorflow/core/lib/strings/proto_serialization.h"
+#include "tensorflow/tsl/lib/strings/proto_serialization.h"
+#include "tensorflow/tsl/protobuf/dnn.pb.h"
 
 namespace stream_executor {
 namespace dnn {
@@ -44,6 +47,8 @@ bool ProtoMapsEqual(const google::protobuf::Map<int64_t, int64_t>& x,
 
 }  // namespace
 
+constexpr DataType ToDataType<tsl::float8_e4m3fn>::value;
+constexpr DataType ToDataType<tsl::float8_e5m2>::value;
 constexpr DataType ToDataType<float>::value;
 constexpr DataType ToDataType<double>::value;
 constexpr DataType ToDataType<Eigen::half>::value;
@@ -68,7 +73,7 @@ AlgorithmDesc::AlgorithmDesc(
 }
 
 uint64_t AlgorithmDesc::hash() const {
-  return tensorflow::DeterministicProtoHash64(proto_);
+  return tsl::DeterministicProtoHash64(proto_);
 }
 
 bool AlgorithmDesc::operator==(const AlgorithmDesc& other) const {
@@ -84,12 +89,14 @@ std::string AlgorithmDesc::ToString() const {
   if (is_cudnn_frontend()) {
     // Format similarly to cudnn_frontend::ExecutionPlan::getTag(), e.g.
     // "eng2{k1=2,k3=4}".
+    absl::btree_map<int64_t, int64_t> tuning_knobs_sorted;
+    absl::c_copy(proto_.tuning_knobs(),
+                 std::inserter(tuning_knobs_sorted, tuning_knobs_sorted.end()));
     return absl::StrFormat(
         "eng%d{%s}", proto_.algo_id(),
         absl::StrJoin(
-            proto_.tuning_knobs(), ",",
-            [](std::string* out,
-               const google::protobuf::Map<int64_t, int64_t>::value_type& pair) {
+            tuning_knobs_sorted, ",",
+            [](std::string* out, const std::pair<int64_t, int64_t>& pair) {
               absl::StrAppendFormat(out, "k%d=%d", pair.first, pair.second);
             }));
   }
@@ -110,12 +117,12 @@ std::vector<std::pair<int64_t, int64_t>> AlgorithmDesc::TuningKnobs() const {
 }
 
 bool DnnSupport::GetConvolveAlgorithms(
-    CudaComputeCapability cuda_compute_capability,
+    CudaComputeCapability cuda_compute_capability, dnn::DataType input_type,
     std::vector<AlgorithmDesc>* out_algorithms) {
   return false;
 }
 
-port::Status DnnSupport::GetConvolveRunners(
+tsl::Status DnnSupport::GetConvolveRunners(
     bool /* use_cudnn_frontend */, dnn::ConvolutionKind /*kind*/,
     dnn::DataType /*input_type*/, dnn::DataType /*output_type*/,
     Stream* /*stream*/, const dnn::BatchDescriptor& /*input_descriptor*/,
@@ -141,7 +148,7 @@ DnnSupport::ConvolveRunnerFromDesc(
   return port::UnimplementedError("ConvolveRunnerFromDesc not implemented.");
 }
 
-port::Status DnnSupport::GetFusedConvolveRunners(
+tsl::Status DnnSupport::GetFusedConvolveRunners(
     bool use_cudnn_frontend, dnn::ConvolutionKind kind,
     dnn::DataType element_type, dnn::DataType bias_type,
     dnn::DataType output_type, double conv_input_scale, double side_input_scale,
@@ -156,7 +163,7 @@ port::Status DnnSupport::GetFusedConvolveRunners(
   return port::UnimplementedError("GetFusedConvolveRunners not implemented.");
 }
 
-port::Status DnnSupport::GetFusedMatmulRunners(
+tsl::Status DnnSupport::GetFusedMatmulRunners(
     bool use_cudnn_frontend, dnn::DataType element_type,
     dnn::DataType bias_type, dnn::DataType output_type, Stream* stream,
     bool trans_a, bool trans_b, uint64_t m, uint64_t n, uint64_t k, int64_t lda,
@@ -202,13 +209,13 @@ bool DnnSupport::GetRnnAlgorithms(std::vector<AlgorithmDesc>* out_algorithms) {
 }
 
 bool DnnSupport::GetConvolveBackwardDataAlgorithms(
-    CudaComputeCapability cuda_compute_capability,
+    CudaComputeCapability cuda_compute_capability, dnn::DataType input_type,
     std::vector<AlgorithmDesc>* out_algorithms) {
   return false;
 }
 
 bool DnnSupport::GetConvolveBackwardFilterAlgorithms(
-    CudaComputeCapability cuda_compute_capability,
+    CudaComputeCapability cuda_compute_capability, dnn::DataType input_type,
     std::vector<AlgorithmDesc>* out_algorithms) {
   return false;
 }
@@ -242,6 +249,8 @@ std::string ActivationModeString(ActivationMode mode) {
       return "tanh";
     case ActivationMode::kBandPass:
       return "bandpass";
+    case ActivationMode::kElu:
+      return "elu";
     default:
       return absl::StrCat("unknown: ", static_cast<int32_t>(mode));
   }
@@ -875,7 +884,7 @@ std::string NormalizeDescriptor::ToShortString() const {
                       "_size:", segment_size_);
 }
 
-bool DnnSupport::IsStatusOk(const port::Status& status, bool report_error) {
+bool DnnSupport::IsStatusOk(const tsl::Status& status, bool report_error) {
   if (status.ok()) {
     return true;
   }
@@ -885,7 +894,7 @@ bool DnnSupport::IsStatusOk(const port::Status& status, bool report_error) {
   return false;
 }
 
-port::Status DnnSupport::DoCtcLoss(
+tsl::Status DnnSupport::DoCtcLoss(
     Stream* stream, dnn::DataType element_type,
     const RnnStateTensorDescriptor& probs_desc,
     const DeviceMemoryBase probs_data, absl::Span<const int> labels_data,

@@ -18,12 +18,14 @@ limitations under the License.
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "absl/memory/memory.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "tensorflow/compiler/jit/compilability_check_util.h"
 #include "tensorflow/compiler/jit/defs.h"
+#include "tensorflow/compiler/jit/device_compiler.h"
 #include "tensorflow/compiler/jit/flags.h"
 #include "tensorflow/compiler/jit/xla_launch_util.h"
 #include "tensorflow/compiler/jit/xla_platform_info.h"
@@ -79,10 +81,21 @@ StatusOr<std::string> GetCompilerIr(
     IrExportStage stage, ProcessFunctionLibraryRuntime* pflr,
     absl::string_view func_name, Device* dev, EagerContext* context,
     absl::Span<const TensorHandle* const> inputs_handles) {
-  // TODO(b/238830423): support GetCompilerIr on TFRT TPU device.
+  using XlaDeviceCompiler =
+      DeviceCompiler<xla::LocalExecutable, xla::LocalClient>;
+
+  auto is_tfrt_tpu_supported_stage = [](IrExportStage stage) {
+    return stage == IrExportStage::HLO ||
+           stage == IrExportStage::HLO_NO_METADATA ||
+           stage == IrExportStage::HLO_SERIALIZED;
+  };
+  // TODO(b/238830423): support GetCompilerIr on TFRT TPU device for stages
+  // that requires compilation from HLO to executable.
   if (dev->device_type() != DEVICE_CPU &&
-      dev->tensorflow_accelerator_device_info()->stream == nullptr) {
-    return errors::Internal("GetCompilerIr is not supported on this device.");
+      dev->tensorflow_accelerator_device_info()->stream == nullptr &&
+      !is_tfrt_tpu_supported_stage(stage)) {
+    return errors::Internal(
+        "GetCompilerIr with requested stage is not supported on this device.");
   }
   NameAttrList function;
   function.set_name(std::string{func_name});
@@ -126,14 +139,14 @@ StatusOr<std::string> GetCompilerIr(
 
   XlaPlatformInfo platform_info = XlaPlatformInfoFromDevice(dev);
 
-  XlaCompilationCache* cache;
-  TF_RETURN_IF_ERROR(rmgr->LookupOrCreate<XlaCompilationCache>(
-      rmgr->default_container(), "xla_cache", &cache,
-      [&](XlaCompilationCache** cache_write_into) {
-        return BuildXlaCompilationCache(dev, flr, platform_info,
-                                        cache_write_into);
+  XlaDeviceCompiler* xla_device_compiler;
+  TF_RETURN_IF_ERROR(rmgr->LookupOrCreate<XlaDeviceCompiler>(
+      rmgr->default_container(), "xla_device_compiler", &xla_device_compiler,
+      [&](XlaDeviceCompiler** xla_device_compiler) {
+        return BuildXlaDeviceCompiler(dev, flr, platform_info,
+                                      xla_device_compiler);
       }));
-  core::ScopedUnref cache_ref(cache);
+  core::ScopedUnref xla_device_compiler_ref(xla_device_compiler);
 
   se::Stream* stream = nullptr;
   if (const DeviceBase::AcceleratorDeviceInfo* accelerator_device_info =
@@ -141,9 +154,14 @@ StatusOr<std::string> GetCompilerIr(
     stream = accelerator_device_info->stream;
   }
 
-  XlaCompiler::Options options =
-      GenerateCompilerOptions(*cache, *flr, dev, stream, platform_info,
-                              /*has_ref_vars=*/false);
+  XlaCompiler::Options options;
+  if (platform_info.device_type() == DEVICE_TPU && stream == nullptr) {
+    options = GenerateTfrtTpuCompilerOptions(*xla_device_compiler, *flr);
+  } else {
+    options = GenerateCompilerOptions(*xla_device_compiler, *flr, dev, stream,
+                                      platform_info,
+                                      /*has_ref_vars=*/false);
+  }
 
   XlaCompiler::CompileOptions compile_options;
   compile_options.always_return_tuple = false;
@@ -156,7 +174,7 @@ StatusOr<std::string> GetCompilerIr(
           constant_arg_indices, inputs, variable_infos, dev);
   TF_RETURN_IF_ERROR(args.status());
 
-  xla::LocalClient* local_client = cache->client();
+  xla::LocalClient* local_client = xla_device_compiler->client();
   XlaCompiler::CompilationResult result;
   TF_RETURN_IF_ERROR(
       compiler.CompileFunction(compile_options, function, *args, &result));
@@ -207,7 +225,6 @@ StatusOr<std::string> GetCompilerIr(
           *executable->executable()->module().entry_computation(),
           "Visualization",
           /*debug_options=*/{}, xla::RenderedGraphFormat::kDot,
-          /*hlo_execution_profile=*/nullptr,
           /*hlo_render_options=*/{});
       TF_RETURN_IF_ERROR(graph.status());
       return *graph;

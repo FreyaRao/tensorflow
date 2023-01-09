@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Math/IR/Math.h"
 #include "mlir/Dialect/Vector/IR/VectorOps.h"
@@ -256,7 +256,7 @@ struct EigenExpM1Approximation : public OpRewritePattern<math::ExpM1Op> {
 LogicalResult EigenExpM1Approximation::matchAndRewrite(
     math::ExpM1Op op, PatternRewriter &rewriter) const {
   auto shape = vectorShape(op.getOperand().getType(), isF32);
-  if (!shape.hasValue())
+  if (!shape.has_value())
     return rewriter.notifyMatchFailure(op, "unsupported operand type");
 
   ImplicitLocOpBuilder builder(op->getLoc(), rewriter);

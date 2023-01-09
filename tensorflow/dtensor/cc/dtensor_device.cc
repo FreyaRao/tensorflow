@@ -18,6 +18,7 @@ limitations under the License.
 #include <algorithm>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -31,6 +32,8 @@ limitations under the License.
 #include "absl/strings/str_join.h"
 #include "absl/strings/string_view.h"
 #include "absl/strings/strip.h"
+#include "mlir/IR/BuiltinOps.h"  // from @llvm-project
+#include "mlir/IR/OwningOpRef.h"  // from @llvm-project
 #include "tensorflow/c/c_api_experimental.h"
 #include "tensorflow/c/eager/c_api.h"
 #include "tensorflow/c/eager/parallel_device/parallel_device_lib.h"
@@ -69,14 +72,15 @@ limitations under the License.
 #include "tensorflow/dtensor/cc/dstatus.h"
 #include "tensorflow/dtensor/cc/dtensor_device_util.h"
 #include "tensorflow/dtensor/cc/dtensor_graph_to_mlir_pass.h"
+#include "tensorflow/dtensor/cc/parallel_executor.h"
 #include "tensorflow/dtensor/cc/small_constant_optimization.h"
 #include "tensorflow/dtensor/cc/tensor_layout.h"
 #include "tensorflow/dtensor/cc/tpu_system_interface.h"
 #include "tensorflow/dtensor/proto/layout.pb.h"
+#include "tensorflow/tsl/platform/status.h"
 
 namespace tensorflow {
 namespace dtensor {
-
 // TODO(b/189332820): Replace this with a Partitioner stub swapped in by the
 // Copybara workflow.
 StatusOr<ExecutionFunctions> ABSL_ATTRIBUTE_WEAK PipeliningPartitionerRun(
@@ -95,11 +99,15 @@ class DTensorDevice {
   explicit DTensorDevice(absl::string_view name)
       : name_(name),
         same_shape_policy_enabled_(false),
-        cancellation_manager_(std::make_unique<CancellationManager>()) {}
+        cancellation_manager_(std::make_unique<CancellationManager>()) {
+    // FIXME(b/258703996): Use tsl.
+    if (getenv("DTENSOR_USE_PARALLEL_EXECUTOR") != nullptr) {
+      parallel_executor_ = CreateDefaultParallelExecutor();
+    }
+  }
 
   void AddMesh(std::unique_ptr<MeshWithParallelDevice> mesh,
                bool is_host_mesh) {
-    // TODO(b/168730933): Consider passing a cheaper int64_t mesh identifier.
     if (is_host_mesh) {
       std::string& tpu_host_mesh = Mesh::tpu_host_mesh();
       const std::string new_tpu_host_mesh = mesh->mesh_config().ToString();
@@ -168,7 +176,7 @@ class DTensorDevice {
       }
     }
     // Setting the default mesh under an empty name repeatedly is fine, which
-    // happens when dtensor_initialize_tpu_system is called multiple times
+    // happens when initialize_tpu_system is called multiple times
     // especially in tests. All the set mappings should be the same anyway.
     if (!mesh_name.empty() && Mesh::tpu_core_ids().count(mesh_name) > 0) {
       return errors::AlreadyExists("Mesh name already in use: ", mesh_name);
@@ -327,24 +335,46 @@ class DTensorDevice {
                   TF_Status* status);
 
   // Update output layouts for eager ops based on same shape policy.
-  void UpdateOutputLayoutsWithSameShapePolicy(
+  Status UpdateOutputLayoutsWithSameShapePolicy(
       const std::vector<PartialTensorShape>& global_output_shapes,
       const absl::flat_hash_set<Mesh>& input_meshes, absl::string_view op_name,
-      tensorflow::Graph* graph, std::vector<const Layout*>* output_layouts,
-      TF_Status* status);
+      tensorflow::Graph* graph, std::vector<const Layout*>* output_layouts);
 
-  // Takes the description of an operation and makes a function out of it with
-  // the same signature, running DTensor MLIR passes. Registers that function
-  // with `context`. `translated_function_name` is set to the name of the
-  // function.
-  //
-  // The resulting function expects a device ID as its first input.
-  void LowerToSPMDFunction(TFE_Context* context,
-                           const std::vector<TensorWithLayout*>& inputs,
-                           const DTensorOperation& doperation,
-                           const TFE_OpAttrs* attributes, const int num_outputs,
-                           const ExecutionFunctions** execution_functions,
-                           TF_Status* status);
+  // Takes the description of an operation and makes a ModuleOp out of it,
+  // running DTensor MLIR passes. The resulting ModuleOp and lowering
+  // by-products are in the LoweredModuleBundle.
+  struct LoweredModuleBundle {
+    // Optional lowered MLIR module.
+    // If exists, it is associated with DTensorDevice's PassRunner.
+    std::optional<mlir::ModuleOp> module;
+    // Graph converted from the lowered MLIR module.
+    std::unique_ptr<tensorflow::Graph> graph;
+    // Derived output layout in MLIR lowering.
+    std::vector<const Layout*> output_layouts;
+    // Derived output shapes in MLIR lowering.
+    std::vector<PartialTensorShape> global_output_shapes;
+    // TF Device list collected during Module lowering.
+    std::vector<tensorflow::Device*> tf_devices;
+    // Device name to MeshWithParallelDevice mapping collected during Module
+    // lowering.
+    absl::flat_hash_map<std::string, const MeshWithParallelDevice*>
+        device_name_to_mesh_device;
+    // Cache key of the operation calculated by
+    // ExecutableManager<T>::GetCachedExecutable based on the doperation and its
+    // metadata (e.g. inputs).
+    tensorflow::Fprint128 doperation_cache_key;
+  };
+  StatusOr<LoweredModuleBundle> LowerToSPMDModule(
+      TFE_Context* context, const std::vector<TensorWithLayout*>& inputs,
+      const DTensorOperation& doperation, const NameAttrList& eager_attributes);
+
+  // Extracts ExecutionFunctions from lowered ModuleOp bundle. Some fields
+  // (e.g. graph) of the input module bundle may be updated.
+  void ModuleToExecutionFunctions(
+      TFE_Context* context, const std::vector<TensorWithLayout*>& inputs,
+      const DTensorOperation& doperation, const NameAttrList& eager_attributes,
+      int num_outputs, LoweredModuleBundle& module_bundle,
+      const ExecutionFunctions** execution_functions, TF_Status* status);
 
   // Execute a given function.
   void ExecuteFunctionAndWait(
@@ -352,6 +382,13 @@ class DTensorDevice {
       const MeshWithParallelDevice* parallel_device_mesh,
       const std::vector<parallel_device::ParallelTensor*>& parallel_inputs,
       const int64_t step_id, const TFE_OpAttrs* attributes, TF_Status* status);
+
+  // Execute regular operation with ParallelExecutor
+  void ParallelExecuteRegularOperation(
+      TFE_Context* context, const std::vector<TensorWithLayout*>& inputs,
+      mlir::ModuleOp mlir_module, const DTensorOperation& doperation,
+      const TFE_OpAttrs* attributes, int* num_outputs,
+      TFE_TensorHandle** outputs, TF_Status* status);
 
   // Implements `Execute` for operations which aren't special-cased in
   void ExecuteRegularOperation(TFE_Context* context,
@@ -366,6 +403,12 @@ class DTensorDevice {
                                            TF_Status* status);
 
   void RecordInShapeLayoutCache(const TensorWithLayout& tensor);
+
+  // Choose a mesh to broadcast a non-dtensor to a dtensor based on the
+  // operation, other input meshes, default mesh, and dtypes.
+  const MeshWithParallelDevice* ChooseBroadcastingMesh(
+      const absl::flat_hash_set<Mesh>& input_meshes,
+      const std::vector<TF_DataType>& dtypes);
 
   // Returns whether a given mesh is a remote mesh.
   bool is_remote_mesh(const Mesh& mesh) const;
@@ -402,10 +445,13 @@ class DTensorDevice {
   };
   absl::flat_hash_map<int64_t, CachedLayout> shape_layout_cache_;
 
-  FunctionManager function_manager_;
+  ExecutableManager<ExecutionFunctions> function_manager_;
+  ExecutableManager<mlir::OwningOpRef<mlir::ModuleOp>> module_manager_;
 
   // Records the function compilation cache hits and misses.
   std::unordered_map<std::string, int> function_compilation_hits_and_misses_;
+  // Records the Module lowering cache hits and misses.
+  std::unordered_map<std::string, int> module_lowering_hits_and_misses_;
 
   // Coordinates cancelling ops across meshes on error. Must outlive any queued
   // async op launches, so we only reset it after seeing a failure status.
@@ -416,6 +462,9 @@ class DTensorDevice {
   // function_mesh_fingerprint and the counter together are used for generating
   // the step id, which is used for rendezvous creation.
   absl::flat_hash_map<uint64, uint64> func_mesh_fingerprint_to_step_counter_;
+
+  // Dispatchs post-SPMD functions.
+  std::unique_ptr<ParallelExecutor> parallel_executor_;
 };
 
 int64_t FingerprintShape(const absl::Span<const int64_t> shape) {
@@ -504,6 +553,32 @@ TF_Buffer* TensorWithLayoutSummarize(void* data, TF_Status* status) {
   std::string summary =
       reinterpret_cast<TensorWithLayout*>(data)->SummarizeValue();
   return TF_NewBufferFromString(summary.data(), summary.size());
+}
+
+const MeshWithParallelDevice* DTensorDevice::ChooseBroadcastingMesh(
+    const absl::flat_hash_set<Mesh>& input_meshes,
+    const std::vector<TF_DataType>& dtypes) {
+  bool has_string_dtype = std::find(dtypes.begin(), dtypes.end(),
+                                    TF_DataType::TF_STRING) != dtypes.end();
+  // String tensors can only be broadcast to a CPU mesh, so broadcast
+  // to CPU mesh if there is one we can infer.
+  if (has_string_dtype) {
+    // Choose the first CPU mesh amongst the input meshes as the CPU broadcast
+    // mesh if it exists.
+    for (const Mesh& mesh : input_meshes) {
+      if (mesh.is_cpu_mesh()) {
+        return mesh_to_device_map_[mesh].get();
+      }
+    }
+  }
+
+  // If a unique mesh is identified across all inputs, we use that mesh as the
+  // mesh to broadcast to. Otherwise we fallback to default mesh.
+  const MeshWithParallelDevice* broadcast_mesh =
+      input_meshes.size() == 1
+          ? mesh_to_device_map_[*input_meshes.begin()].get()
+          : default_mesh_;
+  return broadcast_mesh;
 }
 
 TFE_TensorHandle* DTensorDevice::MakeLayoutTensorHandle(
@@ -1074,22 +1149,20 @@ bool DTensorDevice::IsSparseDTensor(TFE_Context* context,
   return t->tensor_type() == TensorType::kSparse;
 }
 
-void DTensorDevice::UpdateOutputLayoutsWithSameShapePolicy(
+Status DTensorDevice::UpdateOutputLayoutsWithSameShapePolicy(
     const std::vector<PartialTensorShape>& global_output_shapes,
     const absl::flat_hash_set<Mesh>& input_meshes, absl::string_view op_name,
-    tensorflow::Graph* graph, std::vector<const Layout*>* output_layouts,
-    TF_Status* status) {
-  if (!same_shape_policy_enabled_) return;
+    tensorflow::Graph* graph, std::vector<const Layout*>* output_layouts) {
+  if (!same_shape_policy_enabled_) return OkStatus();
   // Simply do not hint if inputs span across multiple meshes.
-  if (input_meshes.size() > 1) return;
+  if (input_meshes.size() > 1) return OkStatus();
 
   for (Node* node : graph->op_nodes()) {
     if (!node->IsRetval()) {
       continue;
     }
     int output_index;
-    RETURN_C_STATUS_IF_NOT_OK(
-        GetNodeAttr(node->attrs(), "index", &output_index), status);
+    TF_RETURN_IF_ERROR(GetNodeAttr(node->attrs(), "index", &output_index));
     if (output_layouts->at(output_index)) {
       continue;
     }
@@ -1153,6 +1226,7 @@ void DTensorDevice::UpdateOutputLayoutsWithSameShapePolicy(
       }
     }
   }
+  return OkStatus();
 }
 
 std::unordered_map<std::string, int>
@@ -1310,32 +1384,25 @@ Status AddExecutionFunctionDefsToFunctionDefLibrary(
   return OkStatus();
 }
 
-void DTensorDevice::LowerToSPMDFunction(
+StatusOr<DTensorDevice::LoweredModuleBundle> DTensorDevice::LowerToSPMDModule(
     TFE_Context* context, const std::vector<TensorWithLayout*>& inputs,
-    const DTensorOperation& doperation, const TFE_OpAttrs* attributes,
-    const int num_outputs, const ExecutionFunctions** execution_functions,
-    TF_Status* status) {
-  profiler::TraceMe activity(
-      [&] { return "DTensorDevice::LowerToSPMDFunction"; },
-      profiler::TraceMeLevel::kInfo);
+    const DTensorOperation& doperation, const NameAttrList& eager_attributes) {
+  profiler::TraceMe activity([&] { return "DTensorDevice::LowerToSPMDModule"; },
+                             profiler::TraceMeLevel::kInfo);
   FunctionLibraryDefinition* flib_def =
       tensorflow::unwrap(context)->FuncLibDef();
-  auto graph(std::make_unique<tensorflow::Graph>(flib_def));
-  NameAttrList eager_attributes;
-  ASSIGN_OR_RETURN_C_STATUS(eager_attributes, FetchAttributes(attributes),
-                            status);
+  LoweredModuleBundle result;
+  result.graph = std::make_unique<tensorflow::Graph>(flib_def);
 
-  std::vector<PartialTensorShape> global_output_shapes;
-  std::vector<const Layout*> output_layouts;
   const FunctionDef* function_def = doperation.function_def;
   if (!function_def) {
     // Output layouts of an eager op (e.g. fill) must be inferred before cache
     // key computation, since they might depend on the current DTensorDevice
     // state.
-    Status s = PrepareGraphForMlir(
+    TF_RETURN_IF_ERROR(PrepareGraphForMlir(
         function_manager_, inputs, doperation, *flib_def, eager_attributes,
-        default_layout_, graph.get(), &global_output_shapes, &output_layouts);
-    RETURN_C_STATUS_IF_NOT_OK(s, status);
+        default_layout_, result.graph.get(), &result.global_output_shapes,
+        &result.output_layouts));
 
     // Finds all meshes the inputs are lied on.
     absl::flat_hash_set<Mesh> input_meshes;
@@ -1346,75 +1413,140 @@ void DTensorDevice::LowerToSPMDFunction(
     }
     // Currently we only provide layout hints for op-by-op, since
     // they interact badly with layout propagation.
-    UpdateOutputLayoutsWithSameShapePolicy(global_output_shapes, input_meshes,
-                                           doperation.name, graph.get(),
-                                           &output_layouts, status);
-    if (TF_GetCode(status) != TF_OK) return;
+    TF_RETURN_IF_ERROR(UpdateOutputLayoutsWithSameShapePolicy(
+        result.global_output_shapes, input_meshes, doperation.name,
+        result.graph.get(), &result.output_layouts));
   }
 
-  std::pair<tensorflow::Fprint128, const ExecutionFunctions*>
-      cache_key_and_func = function_manager_.GetCachedFunction(
-          doperation, eager_attributes, inputs, output_layouts);
-  *execution_functions = cache_key_and_func.second;
-  if (*execution_functions != nullptr) {
-    function_compilation_hits_and_misses_["hit"]++;
-    return;
+  auto [cache_key, cached_mlir_module] = module_manager_.GetCachedExecutable(
+      doperation, eager_attributes, inputs, result.output_layouts);
+  result.doperation_cache_key = cache_key;
+
+  if (cached_mlir_module != nullptr) {
+    module_lowering_hits_and_misses_["hit"]++;
+    result.module = **cached_mlir_module;
+    return result;
   } else if (function_def) {
-    function_compilation_hits_and_misses_["miss"]++;
+    module_lowering_hits_and_misses_["miss"]++;
     LOG(INFO) << "DTensor cache key lookup missed for " << doperation.name
               << ". DTensor is (re-)computing its SPMD transformation.";
   }
 
   // It includes remote devices when the coordination service is enabled.
-  const auto device_list = tensorflow::unwrap(context)->ListAllTfDevices();
+  result.tf_devices = tensorflow::unwrap(context)->ListAllTfDevices();
   DeviceSet device_set;
-  for (const auto device : device_list) device_set.AddDevice(device);
+  for (const auto device : result.tf_devices) device_set.AddDevice(device);
 
   if (function_def) {
-    ASSIGN_OR_RETURN_C_STATUS(auto device_name_to_mesh_device,
-                              PipelineSubMeshes(context), status);
-    const bool is_pipelining_function = !device_name_to_mesh_device.empty();
-    // For a multi-mesh function for pipelining, we take a different execution
-    // path. Call the partitioner to lower and partition the graph into multiple
-    // sub functions to execute (one per sub mesh).
+    TF_ASSIGN_OR_RETURN(result.device_name_to_mesh_device,
+                        PipelineSubMeshes(context));
+    const bool is_pipelining_function =
+        !result.device_name_to_mesh_device.empty();
+    // For a multi-mesh function for pipelining, lowering to ModuleOp is
+    // skipped.
+    // TODO(b/261052628): The pipelining path can be adapted to use a global
+    // ModuleOp instead of directly starting from a function_def. Currently the
+    // function_def is directly lowered to ExecutionFunctions in
+    // ModuleToExecutionFunctions.
     if (is_pipelining_function) {
-      ASSIGN_OR_RETURN_C_STATUS(
-          ExecutionFunctions functions,
-          PipeliningPartitionerRun(&device_name_to_mesh_device, flib_def,
-                                   &pass_runner_, *doperation.function_def,
-                                   eager_attributes, inputs, device_set,
-                                   num_outputs),
-          status);
-      *execution_functions = function_manager_.AddCachedFunction(
-          doperation, cache_key_and_func.first, std::move(functions));
-      return;
+      LOG(INFO) << "For a multi-mesh function for pipelining,"
+                << " lowering to ModuleOp is skipped";
+      return result;
     }
     // Output layouts of a function are inferred by MLIR lowering. They are
     // not necessary for cache key computation, so run PrepareGraphForMlir after
     // cache key computation to reduce the overheads of running the same
     // function multiple times.
-    Status s = PrepareGraphForMlir(
+    TF_RETURN_IF_ERROR(PrepareGraphForMlir(
         function_manager_, inputs, doperation, *flib_def, eager_attributes,
-        default_layout_, graph.get(), &global_output_shapes, &output_layouts);
-    RETURN_C_STATUS_IF_NOT_OK(s, status);
+        default_layout_, result.graph.get(), &result.global_output_shapes,
+        &result.output_layouts));
   }
 
-  absl::flat_hash_set<Node*> control_ret_nodes;
+  VLOG(4) << tensorflow::DumpGraphToFile("after_prepare_for_mlir",
+                                         *result.graph, flib_def);
+
+  mlir::OwningOpRef<mlir::ModuleOp> mlir_module_ref;
   // Run DTensor MLIR passes that convert input graph to SPMD version.
   {
     profiler::TraceMe activity([&] { return "DTensorDevice::RunMLIRPasses"; },
                                profiler::TraceMeLevel::kInfo);
-    RETURN_C_STATUS_IF_NOT_OK(
+    TF_ASSIGN_OR_RETURN(
+        mlir_module_ref,
         pass_runner_.RunOnGraph(device_set, doperation.is_func(), flib_def,
-                                &graph, control_ret_nodes,
-                                cache_key_and_func.first),
-        status);
+                                *result.graph, cache_key));
   }
-  VLOG(4) << tensorflow::DumpGraphToFile("after_mlir_spmd_lowering", *graph,
-                                         flib_def);
+  VLOG(4) << tensorflow::DumpGraphToFile("after_mlir_spmd_lowering",
+                                         *result.graph, flib_def);
+
+  cached_mlir_module = module_manager_.AddCachedExecutable(
+      doperation, cache_key, mlir_module_ref.release());
+  result.module = **cached_mlir_module;
+  return result;
+}
+
+void DTensorDevice::ModuleToExecutionFunctions(
+    TFE_Context* context, const std::vector<TensorWithLayout*>& inputs,
+    const DTensorOperation& doperation, const NameAttrList& eager_attributes,
+    int num_outputs, LoweredModuleBundle& module_bundle,
+    const ExecutionFunctions** execution_functions, TF_Status* status) {
+  profiler::TraceMe activity(
+      [&] { return "DTensorDevice::ModuleToExecutionFunctions"; },
+      profiler::TraceMeLevel::kInfo);
+  FunctionLibraryDefinition* flib_def =
+      tensorflow::unwrap(context)->FuncLibDef();
+  const FunctionDef* function_def = doperation.function_def;
+
+  const ExecutionFunctions* cached_function =
+      function_manager_.GetCachedExecutableSimple(
+          module_bundle.doperation_cache_key);
+  if (cached_function != nullptr) {
+    *execution_functions = cached_function;
+    function_compilation_hits_and_misses_["hit"]++;
+    return;
+  } else if (function_def) {
+    function_compilation_hits_and_misses_["miss"]++;
+    LOG(INFO) << "DTensor cache key lookup missed for " << doperation.name
+              << ". DTensor is (re-)computing its ExecutionFunctions.";
+  }
+
+  if (function_def) {
+    const bool is_pipelining_function =
+        !module_bundle.device_name_to_mesh_device.empty();
+    // For a multi-mesh function for pipelining, we take a different execution
+    // path. Call the partitioner to lower and partition the graph into multiple
+    // sub functions to execute (one per sub mesh).
+    if (is_pipelining_function) {
+      DeviceSet device_set;
+      for (const auto device : module_bundle.tf_devices)
+        device_set.AddDevice(device);
+      ASSIGN_OR_RETURN_C_STATUS(
+          ExecutionFunctions functions,
+          PipeliningPartitionerRun(&module_bundle.device_name_to_mesh_device,
+                                   flib_def, &pass_runner_,
+                                   *doperation.function_def, eager_attributes,
+                                   inputs, device_set, num_outputs),
+          status);
+      *execution_functions = function_manager_.AddCachedExecutable(
+          doperation, module_bundle.doperation_cache_key, std::move(functions));
+      return;
+    }
+  }
+
+  absl::flat_hash_set<Node*> control_ret_nodes;
+  // Extract ExecutionFunctions from lowered ModuleOp.
+  if (!module_bundle.module.has_value()) {
+    RETURN_STATUS(status, TF_INVALID_ARGUMENT,
+                  "ModuleOp for ExecutionFunctions extraction is missing.");
+  }
+  RETURN_C_STATUS_IF_NOT_OK(pass_runner_.AddMlirModuleToGraph(
+                                *module_bundle.module, flib_def,
+                                control_ret_nodes, &(module_bundle.graph)),
+                            status);
+
   if (flib_def->Contains(kLoadEmbeddingFn)) {
     Status s = InsertFunctionForTPUEmbeddingCheckpoint(
-        status, graph.get(), inputs, kLoadEmbeddingFn);
+        status, module_bundle.graph.get(), inputs, kLoadEmbeddingFn);
     RETURN_C_STATUS_IF_NOT_OK(s, status);
   }
 
@@ -1423,21 +1555,23 @@ void DTensorDevice::LowerToSPMDFunction(
   // for each mesh and relevant input and output information.
   ASSIGN_OR_RETURN_C_STATUS(
       ExecutionFunctions functions,
-      IdentifyAllFunctionsToExecute(*graph.get(), global_output_shapes),
+      IdentifyAllFunctionsToExecute(*module_bundle.graph,
+                                    module_bundle.global_output_shapes),
       status);
 
   // In order to ensure that all resource assign operations as well as side
   // effecting ops are executed, we add identity ops before function outputs
   // with control rets.
-  RETURN_C_STATUS_IF_NOT_OK(MaybeInsertIdentityNodes(function_def, graph.get()),
-                            status);
+  RETURN_C_STATUS_IF_NOT_OK(
+      MaybeInsertIdentityNodes(function_def, module_bundle.graph.get()),
+      status);
 
-  VLOG(4) << tensorflow::DumpGraphToFile("after_post_processing_graph", *graph,
-                                         flib_def);
+  VLOG(4) << tensorflow::DumpGraphToFile("after_post_processing_graph",
+                                         *module_bundle.graph, flib_def);
 
   RETURN_C_STATUS_IF_NOT_OK(
-      AddExecutionFunctionDefsToFunctionDefLibrary(control_ret_nodes, context,
-                                                   *graph.get(), &functions),
+      AddExecutionFunctionDefsToFunctionDefLibrary(
+          control_ret_nodes, context, *module_bundle.graph, &functions),
       status);
   functions.num_device_ids = 1;
   if (function_def) {
@@ -1448,8 +1582,8 @@ void DTensorDevice::LowerToSPMDFunction(
     }
   }
 
-  *execution_functions = function_manager_.AddCachedFunction(
-      doperation, cache_key_and_func.first, std::move(functions));
+  *execution_functions = function_manager_.AddCachedExecutable(
+      doperation, module_bundle.doperation_cache_key, std::move(functions));
 }
 
 void DTensorDevice::ExecuteFunctionAndWait(
@@ -1488,14 +1622,53 @@ void DTensorDevice::ExecuteFunctionAndWait(
   }
 }
 
+void DTensorDevice::ParallelExecuteRegularOperation(
+    TFE_Context* context, const std::vector<TensorWithLayout*>& inputs,
+    mlir::ModuleOp mlir_module, const DTensorOperation& doperation,
+    const TFE_OpAttrs* attributes, int* num_outputs, TFE_TensorHandle** outputs,
+    TF_Status* status) {
+  auto future_result =
+      parallel_executor_->Execute(context, inputs, mlir_module,
+                                  /*entry_function_name=*/"main", attributes);
+  auto result_with_status = future_result.Await();
+
+  std::vector<TensorWithLayout*> typed_outputs;
+  ASSIGN_OR_RETURN_C_STATUS(typed_outputs, result_with_status, status);
+  // assign outputs and take outputs' ownership
+  *num_outputs = typed_outputs.size();
+  for (int i = 0; i < *num_outputs; ++i) {
+    outputs[i] = MakeLayoutTensorHandle(
+        context, absl::WrapUnique(typed_outputs[i]), status);
+  }
+}
+
 void DTensorDevice::ExecuteRegularOperation(
     TFE_Context* context, const std::vector<TensorWithLayout*>& inputs,
     const DTensorOperation& doperation, const TFE_OpAttrs* attributes,
     int* num_outputs, TFE_TensorHandle** outputs, TF_Status* status) {
-  const ExecutionFunctions* execution_functions = nullptr;
+  ASSIGN_OR_RETURN_C_STATUS(auto eager_attributes, FetchAttributes(attributes),
+                            status);
 
-  LowerToSPMDFunction(context, inputs, doperation, attributes, *num_outputs,
-                      &execution_functions, status);
+  ASSIGN_OR_RETURN_C_STATUS(
+      auto module_bundle,
+      LowerToSPMDModule(context, inputs, doperation, eager_attributes), status);
+
+  if (parallel_executor_) {
+    if (!module_bundle.module.has_value()) {
+      RETURN_STATUS(status, TF_INTERNAL,
+                    "ParallelExecutor is enabled but ModuleOp is missing.");
+    }
+    ParallelExecuteRegularOperation(context, inputs, *module_bundle.module,
+                                    doperation, attributes, num_outputs,
+                                    outputs, status);
+    return;
+  }
+
+  const ExecutionFunctions* execution_functions = nullptr;
+  ModuleToExecutionFunctions(context, inputs, doperation, eager_attributes,
+                             *num_outputs, module_bundle, &execution_functions,
+                             status);
+
   if (TF_GetCode(status) != TF_OK) return;
 
   // Update input layouts for resource arguments.
@@ -1519,9 +1692,6 @@ void DTensorDevice::ExecuteRegularOperation(
 
   int num_global_outputs = 0;
 
-  // TODO(b/168730933): Lookup is slow as it takes all the devices in the Mesh
-  // object. Ideally we'd just use a fingerprinted int64_t as a unique
-  // identifier for a mesh.
   std::map<std::string, const MeshWithParallelDevice*>
       function_name_and_mesh_mapping;
   absl::flat_hash_set<std::string> excluded_fn_names;
@@ -1540,9 +1710,6 @@ void DTensorDevice::ExecuteRegularOperation(
                         .c_str());
     }
     const Mesh& mesh = *maybe_converted_mesh;
-    // TODO(b/168730933): Lookup is slow as it takes all the devices in the Mesh
-    // object. Ideally we'd just use a fingerprinted int64_t as a unique
-    // identifier for a mesh.
     const MeshWithParallelDevice* parallel_device_mesh =
         mesh_to_device_map_.contains(mesh) ? mesh_to_device_map_[mesh].get()
                                            : default_mesh_;
@@ -1703,9 +1870,6 @@ void DTensorDevice::ExecuteRegularOperation(
       continue;
     }
     const Mesh& mesh = function.function_mesh;
-    // TODO(b/168730933): Lookup is slow as it takes all the devices in the Mesh
-    // object. Ideally we'd just use a fingerprinted int64_t as a unique
-    // identifier for a mesh.
     const MeshWithParallelDevice* parallel_device_mesh =
         function_name_and_mesh_mapping[function.translated_function_name];
 
@@ -1837,11 +2001,16 @@ void DTensorDevice::Execute(const TFE_Op* original_op, int* num_outputs,
   if (TF_GetCode(status) != TF_OK) return;
   std::vector<TFE_TensorHandle*> inputs_vector;
   inputs_vector.reserve(num_inputs);
+
+  std::vector<TF_DataType> dtypes;
+  dtypes.reserve(num_inputs);
+
   for (int input_index = 0; input_index < num_inputs; ++input_index) {
     TFE_TensorHandle* input =
         TFE_OpGetFlatInput(original_op, input_index, status);
     if (TF_GetCode(status) != TF_OK) return;
     inputs_vector.push_back(input);
+    dtypes.push_back(TFE_TensorHandleDataType(input));
   }
   TFE_TensorHandle** inputs = inputs_vector.data();
 
@@ -1900,12 +2069,9 @@ void DTensorDevice::Execute(const TFE_Op* original_op, int* num_outputs,
     typed_inputs[j] = t;
   }
 
-  // If a unique mesh is identified across all inputs, we use that mesh as the
-  // mesh to broadcast to. Otherwise we fallback to default mesh.
   const MeshWithParallelDevice* broadcast_mesh =
-      input_meshes.size() == 1
-          ? mesh_to_device_map_[*input_meshes.begin()].get()
-          : default_mesh_;
+      ChooseBroadcastingMesh(input_meshes, dtypes);
+
   if (!broadcast_mesh) {
     RETURN_STATUS(status, TF_INVALID_ARGUMENT,
                   "No mesh has been registered to DTensor. Use copy_to_mesh to "
@@ -1987,7 +2153,11 @@ TFE_TensorHandle* CopyFromDTensorDevice(TFE_Context* context,
       TFE_TensorHandleDevicePointer(tensor, status));
   if (!tensorflow::dtensor::Layout(typed_input->layout()).IsFullyReplicated()) {
     TF_SetStatus(status, TF_UNIMPLEMENTED,
-                 "Trying to copy a non-replicated DTensor is not supported.");
+                 absl::StrCat("Trying to copy a non-replicated DTensor is not "
+                              "supported. Input tensor is: ",
+                              typed_input->DebugString())
+                     .c_str());
+
     return nullptr;
   }
   if (typed_input->tensor()->dtype() == TF_RESOURCE) {
@@ -2010,17 +2180,81 @@ TFE_TensorHandle* CopyFromDTensorDevice(TFE_Context* context,
   return TFE_TensorHandleCopySharingTensor(typed_input->get_tensor(0), status);
 }
 
+bool PinToDTensorDevice(const TFE_Op* op, TF_Status* s) {
+  // Always pin to the dtensor device if any of its input is a dtensor.
+  // Note that if this function is called, the caller guarantees
+  // that all inputs that are on a custom device is a single dtensor device.
+
+  // Exception 1:
+  // If there is a non-dtensor resource tensor and other dtensor inputs
+  // are not on a CPU mesh, then pin to the physical device.
+  //
+  // This is because our resource upcast to a dtensor only supports broadcasting
+  // to a CPU mesh. If any other dtensor inputs are on a TPU mesh,
+  // then the mesh that is broadcasted will be the TPU mesh.
+  int num_inputs = TFE_OpGetFlatInputCount(op, s);
+  std::vector<TFE_TensorHandle*> inputs_vector;
+  inputs_vector.reserve(num_inputs);
+
+  absl::flat_hash_set<Mesh> input_meshes;
+
+  bool has_non_dtensor_resource = false;
+
+  for (int input_index = 0; input_index < num_inputs; ++input_index) {
+    TFE_TensorHandle* input = TFE_OpGetFlatInput(op, input_index, s);
+
+    std::string input_device_name =
+        std::string(TFE_TensorHandleDeviceName(input, s));
+    if (!absl::StrContains(absl::AsciiStrToLower(input_device_name),
+                           "custom")) {
+      TF_DataType dtype = TFE_TensorHandleDataType(input);
+      if (dtype == TF_RESOURCE) {
+        has_non_dtensor_resource = true;
+      }
+      continue;
+    }
+
+    // Handle input which is on DTensor device already.
+    TensorWithLayout* t = reinterpret_cast<TensorWithLayout*>(
+        TFE_TensorHandleDevicePointer(input, s));
+
+    if (!t->layout().mesh().IsEmpty()) {
+      input_meshes.insert(t->layout().mesh());
+    }
+  }
+
+  const Mesh* broadcast_mesh =
+      input_meshes.size() == 1 ? &(*input_meshes.begin()) : nullptr;
+
+  // Place on physical device as dtensor does not support upcasting resource
+  // tensor to a non-cpu mesh.
+  if (has_non_dtensor_resource && broadcast_mesh &&
+      !broadcast_mesh->is_cpu_mesh()) {
+    LOG(WARNING)
+        << "DTensor Function has been pinned back to a physical device because"
+        << "a regular TF Variable is an input along with dtensor inputs and "
+        << "was unable to be upcasted to a DVariable. This "
+        << "may be unintended and signify an error in the way the user is "
+        << "mixing dtensors with regular variables as inputs to a function.";
+    return false;
+  }
+
+  return true;
+}
+
 void AllocateDTensorDevice(absl::string_view device_name,
                            TFE_CustomDevice* device, void** device_info) {
   device->copy_tensor_to_device = &CopyToDTensorDevice;
   device->copy_tensor_from_device = &CopyFromDTensorDevice;
   device->delete_device = &DeleteDTensorDevice;
   device->execute = &ExecuteOnDTensorDevice;
+  device->shall_pin_to_this_device = &PinToDTensorDevice;
   *device_info = new DTensorDevice(device_name);
 }
 
 void AddMesh(const std::string& serialized_mesh, void* device_info,
-             bool is_async, bool is_host_mesh, TF_Status* status) {
+             bool is_async, bool is_host_mesh, int in_flight_nodes_limit,
+             TF_Status* status) {
   auto mesh_config_or_status = Mesh::FromString(serialized_mesh);
   if (!mesh_config_or_status.ok()) {
     TF_SetStatus(status, TF_INTERNAL,
@@ -2037,8 +2271,8 @@ void AddMesh(const std::string& serialized_mesh, void* device_info,
   // DTensor uses multi-client setup which doesn't use remote eager, so we can
   // enable eager async execution in ParallelDevice.
   std::unique_ptr<tensorflow::parallel_device::ParallelDevice> parallel(
-      new tensorflow::parallel_device::ParallelDevice(underlying_devices,
-                                                      is_async));
+      new tensorflow::parallel_device::ParallelDevice(
+          underlying_devices, is_async, in_flight_nodes_limit));
 
   std::string composite_device_name;
   if (absl::StartsWith(mesh_config.name(), kPipelineMeshNamePrefix)) {

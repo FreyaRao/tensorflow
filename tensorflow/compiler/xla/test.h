@@ -39,11 +39,11 @@ limitations under the License.
 #if defined(PLATFORM_GOOGLE) || defined(PLATFORM_GOOGLE_ANDROID)
 #include <gmock/gmock.h>  // IWYU pragma: export
 #else
-#include <gmock/gmock-generated-matchers.h>  // IWYU pragma: export
+#include <gmock/gmock-actions.h>
 #include <gmock/gmock-matchers.h>            // IWYU pragma: export
 #include <gmock/gmock-more-matchers.h>       // IWYU pragma: export
 #endif
 
-#include "tensorflow/core/platform/test.h"  // IWYU pragma: export
+#include "tensorflow/tsl/platform/test.h"  // IWYU pragma: export
 
 #endif  // TENSORFLOW_COMPILER_XLA_TEST_H_

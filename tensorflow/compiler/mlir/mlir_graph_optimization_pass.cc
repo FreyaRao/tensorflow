@@ -23,7 +23,7 @@ limitations under the License.
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/raw_os_ostream.h"
-#include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"  // from @llvm-project
+#include "mlir/Dialect/Arith/IR/Arith.h"  // from @llvm-project
 #include "mlir/Dialect/Func/IR/FuncOps.h"  // from @llvm-project
 #include "mlir/Dialect/Shape/IR/Shape.h"  // from @llvm-project
 #include "tensorflow/compiler/mlir/tensorflow/ir/tf_device.h"
@@ -118,7 +118,7 @@ MlirOptimizationPassRegistry& MlirOptimizationPassRegistry::Global() {
 
 static void RegisterDialects(mlir::DialectRegistry& registry) {
   // clang-format off
-  registry.insert<mlir::arith::ArithmeticDialect,
+  registry.insert<mlir::arith::ArithDialect,
                   mlir::func::FuncDialect,
                   mlir::TF::TensorFlowDialect,
                   mlir::shape::ShapeDialect,
@@ -168,26 +168,12 @@ Status MlirFunctionOptimizationPass::Run(
     }
   }
 
-  static const char* kTfMlirCategory = "TfMlir";
-  tensorflow::metrics::ScopedCounter<2> timings(
-      tensorflow::metrics::GetGraphOptimizationCounter(),
-      {kTfMlirCategory, "graph_analysis"});
-
-  timings.ReportAndStop();
-
   if (overall_state == MlirOptimizationPassState::Disabled) {
     if (VLOG_IS_ON(1)) {
       LOG_FIRST_N(INFO, 1)
           << "None of the MLIR Optimization Passes are enabled "
           << "(registered " << registry_->passes().size() << ")";
     }
-    // Capture stats on graph properties analyzed before running the MLIR
-    // bridge. We set `uses_uninitialized_resource_args` to false here because
-    // function optimization is not affected by uninitialized resource args.
-    // TODO(b/241853328): Remove LogGraphFeatures when fixed
-    LogGraphFeatures(**graph, flib_def, config_proto,
-                     /*uses_uninitialized_resource_args=*/false,
-                     /*is_v1_compat=*/false);
     return OkStatus();
   }
 
@@ -214,7 +200,11 @@ Status MlirFunctionOptimizationPass::Run(
   // during import is not necessary.
   import_config.enable_shape_inference = false;
 
-  timings.Reset({kTfMlirCategory, "convert_graph_to_mlir"});
+  static const char* kTfMlirCategory = "TfMlir";
+  tensorflow::metrics::ScopedCounter<2> timings(
+      tensorflow::metrics::GetGraphOptimizationCounter(),
+      {kTfMlirCategory, "convert_graph_to_mlir"});
+
   auto module_ref_status = ConvertGraphToMlir(**graph, debug_info, *flib_def,
                                               import_config, &context);
   timings.ReportAndStop();
@@ -232,14 +222,6 @@ Status MlirFunctionOptimizationPass::Run(
   mlir::OwningOpRef<mlir::ModuleOp> module_ref =
       std::move(module_ref_status.value());
   AddDevicesToOp(*module_ref, &device_set);
-
-  // Capture stats on graph properties analyzed before running the MLIR
-  // bridge. We set `uses_uninitialized_resource_args` to false here because
-  // function optimization is not affected by uninitialized resource args.
-  // TODO (b/241853328) Remove LogGraphFeatures when fixed
-  LogGraphFeatures(**graph, flib_def, config_proto,
-                   /*uses_uninitialized_resource_args=*/false,
-                   /*is_v1_compat=*/false);
 
   int per_pass_state_index = 0;
   for (auto& pass_registration : registry_->passes()) {
@@ -344,6 +326,7 @@ Status MlirV1CompatGraphOptimizationPass::Run(
       pass->GetPassState(options.device_set, options.session_options->config,
                          **options.graph, *options.flib_def);
 
+
   if (pass_state == MlirOptimizationPassState::Disabled) {
     LOG_FIRST_N(INFO, 1) << "MLIR V1 optimization pass is not enabled";
     return OkStatus();
@@ -375,14 +358,6 @@ Status MlirV1CompatGraphOptimizationPass::Run(
 
   llvm::StringRef name = pass->name();
   VLOG(2) << "Run MLIR V1 graph optimization pass: " << StringRefToView(name);
-  // If we ever have more than one MlirV1CompatOptimization pass we need to
-  // ensure the logging only happens once per graph to avoid redundant logging
-  // (see how it is used in the MLIRFunctionOptimizationPass as an example)
-  // TODO(b/241853328): Remove LogGraphFeatures when fixed
-  LogGraphFeatures(**options.graph, options.flib_def,
-                   options.session_options->config,
-                   /*uses_uninitialized_resource_args=*/false,
-                   /*is_v1_compat=*/true);
 
   if (VLOG_IS_ON(1)) {
     DumpModule(*module_ref, llvm::formatv("mlir_{0}_before_", name));

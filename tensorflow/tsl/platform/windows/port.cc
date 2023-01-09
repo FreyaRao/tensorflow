@@ -59,6 +59,8 @@ string JobName() {
 
 int64_t JobUid() { return -1; }
 
+int64_t TaskId() { return -1; }
+
 int NumSchedulableCPUs() {
   SYSTEM_INFO system_info;
   GetSystemInfo(&system_info);
@@ -126,6 +128,21 @@ bool Snappy_Compress(const char* input, size_t length, string* output) {
   output->resize(snappy::MaxCompressedLength(length));
   size_t outlen;
   snappy::RawCompress(input, length, &(*output)[0], &outlen);
+  output->resize(outlen);
+  return true;
+#else
+  return false;
+#endif
+}
+
+bool Snappy_CompressFromIOVec(const struct iovec* iov,
+                              size_t uncompressed_length, string* output) {
+#ifdef TF_USE_SNAPPY
+  output->resize(snappy::MaxCompressedLength(uncompressed_length));
+  size_t outlen;
+  const snappy::iovec* snappy_iov = reinterpret_cast<const snappy::iovec*>(iov);
+  snappy::RawCompressFromIOVec(snappy_iov, uncompressed_length, &(*output)[0],
+                               &outlen);
   output->resize(outlen);
   return true;
 #else

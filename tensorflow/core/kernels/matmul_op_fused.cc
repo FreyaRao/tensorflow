@@ -48,7 +48,7 @@ limitations under the License.
 #include "tensorflow/core/util/tensor_format.h"
 
 #if defined(TENSORFLOW_USE_CUSTOM_CONTRACTION_KERNEL)
-#include "tensorflow/core/kernels/eigen_contraction_kernel.h"
+#include "tensorflow/tsl/framework/contraction/eigen_contraction_kernel.h"
 #endif
 
 #if GOOGLE_CUDA
@@ -183,7 +183,7 @@ StatusOr<se::cuda::BlasLt::Epilogue> GetBlasLtEpilogOp(
   } else if (fusion == FusedComputationType::kBiasAddWithRelu) {
     return se::cuda::BlasLt::Epilogue::kBiasThenReLU;
   } else if (fusion == FusedComputationType::kBiasAddWithGeluApproximate) {
-    return se::cuda::BlasLt::Epilogue::kBiasThenGeLUApproximate;
+    return se::cuda::BlasLt::Epilogue::kBiasThenGELU;
   } else {
     return errors::Internal("Unsupported fusion for BlasLt Matmul");
   }
@@ -455,6 +455,14 @@ struct LaunchFusedMatMulOp<GPUDevice, T> {
         matmul_activation_mode = se::dnn::ActivationMode::kGeluExact;
         use_cudnn = true;
         break;
+      case FusedComputationType::kBiasAddWithTanh:
+        matmul_activation_mode = se::dnn::ActivationMode::kTanh;
+        use_cudnn = true;
+        break;
+      case FusedComputationType::kBiasAddWithSigmoid:
+        matmul_activation_mode = se::dnn::ActivationMode::kSigmoid;
+        use_cudnn = true;
+        break;
       default:
         use_cudnn = false;
     }
@@ -463,21 +471,20 @@ struct LaunchFusedMatMulOp<GPUDevice, T> {
 
     // The Gelu exact fusion is supported by the cuDNN.
     if (use_cudnn) {
-      int device_id = stream->parent()->device_ordinal();
-      DataType ab_dtype = a.dtype();
-      DataType c_dtype = output->dtype();
-      MatmulParameters cudnn_matmul_params = {/*ab_type=*/ab_dtype,
-                                              /*c_type=*/c_dtype,
-                                              trans_a,
-                                              trans_b,
-                                              static_cast<uint64_t>(m),
-                                              static_cast<uint64_t>(n),
-                                              static_cast<uint64_t>(k),
-                                              a.dim_size(1),
-                                              b.dim_size(1),
-                                              output->dim_size(1),
-                                              matmul_activation_mode,
-                                              device_id};
+      MatmulParameters cudnn_matmul_params = {
+          stream->parent(),
+          /*ab_type=*/a.dtype(),
+          /*c_type=*/output->dtype(),
+          trans_a,
+          trans_b,
+          static_cast<uint64_t>(m),
+          static_cast<uint64_t>(n),
+          static_cast<uint64_t>(k),
+          a.dim_size(1),
+          b.dim_size(1),
+          output->dim_size(1),
+          matmul_activation_mode,
+      };
 
       auto entry_or = AutotuneFusedMatmul<T>(
           use_autotune, FusedMatmulAutotuneMap::GetInstance(),
@@ -492,14 +499,14 @@ struct LaunchFusedMatMulOp<GPUDevice, T> {
       se::dnn::FusedMatmulOp::Config config;
       auto primary_or = runners.primary->GetOrCreateRunner(config, stream);
       OP_REQUIRES_OK(context, primary_or.status());
-      auto* primary = primary_or.ValueOrDie();
+      auto* primary = primary_or.value();
 
       const se::dnn::FusedMatmulRunner* no_scratch_fallback = nullptr;
       if (runners.no_scratch_fallback) {
         auto no_scratch_fallback_or =
             runners.no_scratch_fallback->GetOrCreateRunner(config, stream);
         OP_REQUIRES_OK(context, no_scratch_fallback_or.status());
-        no_scratch_fallback = no_scratch_fallback_or.ValueOrDie();
+        no_scratch_fallback = no_scratch_fallback_or.value();
       }
 
       auto runner_and_scratch_or =
@@ -518,7 +525,7 @@ struct LaunchFusedMatMulOp<GPUDevice, T> {
 
     auto epilog_op_or = GetBlasLtEpilogOp(fusion);
     OP_REQUIRES_OK(context, epilog_op_or.status());
-    se::cuda::BlasLt::Epilogue epilog_op = epilog_op_or.ValueOrDie();
+    se::cuda::BlasLt::Epilogue epilog_op = epilog_op_or.value();
 
     se::blas::Transpose trans[] = {se::blas::Transpose::kNoTranspose,
                                    se::blas::Transpose::kTranspose};
@@ -586,6 +593,8 @@ class FusedMatMulOp : public OpKernel {
       patterns = {
           {FCT::kBiasAdd, {"BiasAdd"}},
           {FCT::kBiasAddWithRelu, {"BiasAdd", "Relu"}},
+          {FCT::kBiasAddWithTanh, {"BiasAdd", "Tanh"}},
+          {FCT::kBiasAddWithSigmoid, {"BiasAdd", "Sigmoid"}},
           {FCT::kBiasAddWithGeluApproximate, {"BiasAdd", "GeluApproximate"}},
           {FCT::kBiasAddWithGeluExact, {"BiasAdd", "GeluExact"}}};
     }
@@ -594,10 +603,13 @@ class FusedMatMulOp : public OpKernel {
                                 context, "MatMul", patterns,
                                 &fused_computation_, &fused_computation_args_));
     if (std::is_same<Device, GPUDevice>::value &&
-        fused_computation_ == FCT::kBiasAddWithGeluExact) {
+        (fused_computation_ == FCT::kBiasAddWithGeluExact ||
+         fused_computation_ == FCT::kBiasAddWithTanh ||
+         fused_computation_ == FCT::kBiasAddWithSigmoid)) {
       OP_REQUIRES(context, DataTypeToEnum<T>::value == DT_HALF,
-                  errors::InvalidArgument("Matmul with BiasAdd+GeluExact "
-                                          "supports only DT_HALF data type."));
+                  errors::InvalidArgument(
+                      "Matmul with BiasAdd+GeluExact|Tanh|Sigmoid supports "
+                      "only DT_HALF data type."));
     }
     use_autotune_ = MatmulAutotuneEnable();
   }

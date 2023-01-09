@@ -32,8 +32,8 @@ limitations under the License.
 #include "tensorflow/compiler/xla/tests/test_macros.h"
 #include "tensorflow/compiler/xla/types.h"
 #include "tensorflow/compiler/xla/xla_data.pb.h"
-#include "tensorflow/core/platform/test_benchmark.h"
 #include "tensorflow/tsl/platform/logging.h"
+#include "tensorflow/tsl/platform/test_benchmark.h"
 
 namespace xla {
 namespace {
@@ -197,7 +197,7 @@ XLA_TEST_F(TransferManagerTest,
   Literal literal = LiteralUtil::CreateR2WithLayout<float>(
       {{1.0f, 2.0f, 3.0f}, {4.0f, 5.0f, 6.0f}}, LayoutUtil::MakeLayout({0, 1}));
   const Shape ondevice_shape =
-      ShapeUtil::MakeShapeWithLayout(F32, {2, 3}, {1, 0});
+      ShapeUtil::MakeShapeWithDenseLayout(F32, {2, 3}, {1, 0});
   auto device_buffer = AllocateDeviceBuffer(ondevice_shape);
 
   // Round trip literal through device. Set the on-device layout to something
@@ -476,7 +476,7 @@ BENCHMARK(BM_TransferDeviceToHost)
 
 int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
-  tensorflow::testing::RunBenchmarks();
+  tsl::testing::RunBenchmarks();
   return RUN_ALL_TESTS();
 }
 
