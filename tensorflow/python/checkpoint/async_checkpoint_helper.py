@@ -283,6 +283,7 @@ class AsyncCheckpointHelper:
         self._writer_sem.release()
 
         async_save_end_time = time.time()
+        print("Async checkpoint save time: %f" % (async_save_end_time - async_save_start_time))
         metrics.AddAsyncCheckpointWriteDuration(
             api_label=_ASYNC_CHECKPOINT,
             microseconds=_get_duration_microseconds(async_save_start_time,
