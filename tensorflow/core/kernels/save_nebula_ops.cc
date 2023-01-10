@@ -131,7 +131,7 @@ namespace tensorflow {
         }
 
         void Compute(OpKernelContext* context) override {
-            clock_t start_0, start_1, end;
+            clock_t start_0, start_1, end, shm_allocate_start, shm_allocate_end;
             start_0 = clock();
             const Tensor& prefix = context->input(0);
             const Tensor& tensor_names = context->input(1);
@@ -167,12 +167,15 @@ namespace tensorflow {
             //std::cout << "Nebula2 Tensor size: " << total_size << std::endl;
             string data_path = DataFilename(destination_prefix_string, 0, 1);
             const char * filename_ =const_cast<char *>(data_path.c_str());
-            std::cout << "Nebula filename_: " << filename_ << std::endl;
+            //std::cout << "Nebula filename_: " << filename_ << std::endl;
             string str;
             str = writer.md5_shm(filename_,str);
             char * shm_name = const_cast<char *>(str.c_str());
             std::cout << "Nebula shm_name: " << shm_name << std::endl;
+            shm_allocate_start = clock();
             writer.allocate(shm_name, total_size);
+            shm_allocate_end = clock();
+            std::cout << "Nebula shm_allocate_time: " << (double)(shm_allocate_end - shm_allocate_start) / CLOCKS_PER_SEC << std::endl;
             start_1 = clock();
             for (int i = 0; i < num_tensors; ++i) {
                 const string& tensor_name = tensor_names_flat(i);

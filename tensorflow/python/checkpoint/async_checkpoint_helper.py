@@ -297,7 +297,6 @@ class AsyncCheckpointHelper:
         # much time.
         global _END_TIME_OF_LAST_ASYNC_WRITE
         with _END_TIME_OF_LAST_ASYNC_WRITE_LOCK:
-          print("\nAsync checkpoint interval: %fs\n" % (async_save_start_time - _END_TIME_OF_LAST_ASYNC_WRITE))
           metrics.AddTrainingTimeSaved(
               api_label=_ASYNC_CHECKPOINT,
               microseconds=_get_duration_microseconds(

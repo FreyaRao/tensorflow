@@ -1563,7 +1563,7 @@ Status FileOutputBuffer::MemcpyToShm(StringPiece data, char * shm_name) {
   start = clock();
   memcpy(mem_ref + shm_position_, data.data(), data.size());
   end = clock();
-  std::cout<<"Memcpy time = "<<double(end-start)/CLOCKS_PER_SEC<<"s" << std::endl;
+  //std::cout<<"Memcpy time = "<<double(end-start)/CLOCKS_PER_SEC<<"s" << std::endl;
   crc32c_ = crc32c::Extend(crc32c_, mem_ref + shm_position_, data.size());
   //std::cout << "nebula shm crc32" << crc32c_ << std::endl;
   shm_position_ += data.size();
