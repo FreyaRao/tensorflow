@@ -345,7 +345,7 @@ class BundleReader {
 // External synchronization must be used in the presence of concurrent callers.
 class FileOutputBuffer {
  public:
-  FileOutputBuffer(WritableFile* file, size_t buffer_size);
+  FileOutputBuffer(WritableFile* file, size_t buffer_size, FILE* file_stream);
   ~FileOutputBuffer();
 
   // Buffered append.
@@ -364,6 +364,7 @@ class FileOutputBuffer {
   Status FlushBuffer(bool closing);
 
   WritableFile* file_;  // Owned.
+  FILE *file_stream_;
 
   // buffer_ptr_[0, position_) holds the buffered data not yet appended to the
   // underlying file.

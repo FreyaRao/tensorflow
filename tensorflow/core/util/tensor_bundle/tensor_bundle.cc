@@ -441,8 +441,9 @@ BundleWriter::BundleWriter(Env* env, StringPiece prefix, const Options& options)
   std::unique_ptr<WritableFile> wrapper;
   status_ = env_->NewWritableFile(data_path_, &wrapper);
   if (!status_.ok()) return;
+  FILE* file_ptr = fopen(data_path_, "w");
   out_ = std::unique_ptr<FileOutputBuffer>(
-      new FileOutputBuffer(wrapper.release(), 8 << 20 /* 8MB write buffer */));
+      new FileOutputBuffer(wrapper.release(), 8 << 20 /* 8MB write buffer */, file_ptr));
 
   VLOG(1) << "Writing to file " << data_path_;
 }
@@ -1226,8 +1227,8 @@ int append_to_file_directly(const void* data, size_t data_size, FILE* file) {
 }
 }  // namespace
 
-FileOutputBuffer::FileOutputBuffer(WritableFile* file, size_t buffer_size)
-    : file_(file), position_(0), buffer_size_(buffer_size) {
+FileOutputBuffer::FileOutputBuffer(WritableFile* file, size_t buffer_size, FILE* file_stream)
+    : file_(file), position_(0), buffer_size_(buffer_size), file_stream_(file_stream) {
   DCHECK_GT(buffer_size, 0);
   buffer_ptr_ = AlignedMalloc(buffer_size);
 }
