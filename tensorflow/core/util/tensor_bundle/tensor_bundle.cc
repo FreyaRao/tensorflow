@@ -426,6 +426,7 @@ BundleWriter::BundleWriter(Env* env, StringPiece prefix, const Options& options)
   if (!status_.ok()) return;
 
   data_path_ = DataFilename(prefix_, 0, 1);
+  tmp_data_path_ = "/tmp/test";
   metadata_path_ = MetaFilename(prefix_);
   if (use_temp_file_) {
     data_path_ = strings::StrCat(data_path_, ".tempstate", random::New64());
@@ -439,7 +440,7 @@ BundleWriter::BundleWriter(Env* env, StringPiece prefix, const Options& options)
   }
 
   std::unique_ptr<WritableFile> wrapper;
-  status_ = env_->NewWritableFile(data_path_, &wrapper);
+  status_ = env_->NewWritableFile(tmp_data_path_, &wrapper);
   if (!status_.ok()) return;
   const char * path = data_path_.c_str();
   FILE* file_ptr = fopen(path, "w");
