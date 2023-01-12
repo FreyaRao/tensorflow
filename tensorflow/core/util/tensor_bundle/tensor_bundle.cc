@@ -1214,6 +1214,16 @@ inline char* AlignedMalloc(size_t size) {
   DCHECK(buffer);
   return buffer;
 }
+int append_to_file_directly(const void* data, size_t data_size, FILE* file) {
+    if (data_size > 0) {
+        size_t ret = fwrite(data, 1, data_size, file);
+        if (ret != data_size) {
+            std::cout << "Fail to fwrite to file: " << ferror(file) << std::endl;
+            return -2;
+        }
+    }
+    return 0;
+}
 }  // namespace
 
 FileOutputBuffer::FileOutputBuffer(WritableFile* file, size_t buffer_size)
@@ -1231,30 +1241,37 @@ Status FileOutputBuffer::Append(StringPiece data) {
   // In the below, it is critical to calculate the checksum on the actually
   // copied bytes, not the source bytes.  This is because "data" typically
   // points to tensor buffers, which may be concurrently written.
-  if (data.size() + position_ <= buffer_size_) {
-    // Can fit into the current buffer.
-    memcpy(buffer_ptr_ + position_, data.data(), data.size());
-    crc32c_ = crc32c::Extend(crc32c_, buffer_ptr_ + position_, data.size());
-  } else if (data.size() <= buffer_size_) {
-    // Cannot fit, but can fit after flushing.
-    TF_RETURN_IF_ERROR(FlushBuffer(false));
-    memcpy(buffer_ptr_, data.data(), data.size());
-    crc32c_ = crc32c::Extend(crc32c_, buffer_ptr_, data.size());
-  } else {
-    // Cannot fit even after flushing.  So we break down "data" by chunk, and
-    // flush/checksum each chunk.
-    TF_RETURN_IF_ERROR(FlushBuffer(false));
-    for (size_t i = 0; i < data.size(); i += buffer_size_) {
-      const size_t nbytes = std::min(data.size() - i, buffer_size_);
-      memcpy(buffer_ptr_, data.data() + i, nbytes);
-      crc32c_ = crc32c::Extend(crc32c_, buffer_ptr_, nbytes);
-      position_ = nbytes;
-      TF_RETURN_IF_ERROR(FlushBuffer(false));
+//  if (data.size() + position_ <= buffer_size_) {
+//    // Can fit into the current buffer.
+//    memcpy(buffer_ptr_ + position_, data.data(), data.size());
+//    crc32c_ = crc32c::Extend(crc32c_, buffer_ptr_ + position_, data.size());
+//  } else if (data.size() <= buffer_size_) {
+//    // Cannot fit, but can fit after flushing.
+//    TF_RETURN_IF_ERROR(FlushBuffer(false));
+//    memcpy(buffer_ptr_, data.data(), data.size());
+//    crc32c_ = crc32c::Extend(crc32c_, buffer_ptr_, data.size());
+//  } else {
+//    // Cannot fit even after flushing.  So we break down "data" by chunk, and
+//    // flush/checksum each chunk.
+//    TF_RETURN_IF_ERROR(FlushBuffer(false));
+//    for (size_t i = 0; i < data.size(); i += buffer_size_) {
+//      const size_t nbytes = std::min(data.size() - i, buffer_size_);
+//      memcpy(buffer_ptr_, data.data() + i, nbytes);
+//      crc32c_ = crc32c::Extend(crc32c_, buffer_ptr_, nbytes);
+//      position_ = nbytes;
+//      TF_RETURN_IF_ERROR(FlushBuffer(false));
+//    }
+//    return OkStatus();
+//  }
+//  position_ += data.size();
+//  return OkStatus();
+
+
+    if(append_to_file_directly(data.data(), data.size(), file_) == 0) {
+        return OkStatus();
+    } else {
+        return errors::Internal("Fail to append to file");
     }
-    return OkStatus();
-  }
-  position_ += data.size();
-  return OkStatus();
 }
 
 Status FileOutputBuffer::Close() {
