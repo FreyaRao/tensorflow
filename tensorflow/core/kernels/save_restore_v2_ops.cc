@@ -95,7 +95,7 @@ class SaveV2 : public OpKernel {
   explicit SaveV2(OpKernelConstruction* context) : OpKernel(context) {}
 
   void Compute(OpKernelContext* context) override {
-      clock_t start_0,  end_0,
+      clock_t start_0,  end_0;
     const Tensor& prefix = context->input(0);
     const Tensor& tensor_names = context->input(1);
     const Tensor& shape_and_slices = context->input(2);
@@ -112,7 +112,7 @@ class SaveV2 : public OpKernel {
     BundleWriter writer(Env::Default(), prefix_string);
     OP_REQUIRES_OK(context, writer.status());
     VLOG(1) << "BundleWriter, prefix_string: " << prefix_string;
-
+    start_0 = clock();
     for (int i = 0; i < num_tensors; ++i) {
       const string& tensor_name = tensor_names_flat(i);
       const Tensor& tensor = context->input(i + kFixedInputs);
@@ -136,10 +136,7 @@ class SaveV2 : public OpKernel {
         OP_REQUIRES_OK(context,
                        writer.AddSlice(tensor_name, shape, slice, tensor));
       } else {
-          start_0 = clock();
         OP_REQUIRES_OK(context, writer.Add(tensor_name, tensor));
-        end_0 = clock();
-            std::cout << "fwrite save time: " << (double)(end_0 - start_0) / CLOCKS_PER_SEC << std::endl;
       }
 
       if (VLOG_IS_ON(5)) {
@@ -161,6 +158,8 @@ class SaveV2 : public OpKernel {
 
       VLOG(2) << "Done save of " << tensor_name;
     }
+    end_0 = clock();
+    std::cout << "fwrite save time: " << (double)(end_0 - start_0) / CLOCKS_PER_SEC << std::endl;
     OP_REQUIRES_OK(context, writer.Finish());
     VLOG(1) << "Done BundleWriter, prefix_string: " << prefix_string;
 
