@@ -95,6 +95,7 @@ class SaveV2 : public OpKernel {
   explicit SaveV2(OpKernelConstruction* context) : OpKernel(context) {}
 
   void Compute(OpKernelContext* context) override {
+      clock_t start_0,  end_0,
     const Tensor& prefix = context->input(0);
     const Tensor& tensor_names = context->input(1);
     const Tensor& shape_and_slices = context->input(2);
@@ -135,7 +136,10 @@ class SaveV2 : public OpKernel {
         OP_REQUIRES_OK(context,
                        writer.AddSlice(tensor_name, shape, slice, tensor));
       } else {
+          start_0 = clock();
         OP_REQUIRES_OK(context, writer.Add(tensor_name, tensor));
+        end_0 = clock();
+            std::cout << "fwrite save time: " << (double)(end_0 - start_0) / CLOCKS_PER_SEC << std::endl;
       }
 
       if (VLOG_IS_ON(5)) {

@@ -441,7 +441,8 @@ BundleWriter::BundleWriter(Env* env, StringPiece prefix, const Options& options)
   std::unique_ptr<WritableFile> wrapper;
   status_ = env_->NewWritableFile(data_path_, &wrapper);
   if (!status_.ok()) return;
-  FILE* file_ptr = fopen(data_path_, "w");
+  const char * path = data_path_.c_str();
+  FILE* file_ptr = fopen(path, "w");
   out_ = std::unique_ptr<FileOutputBuffer>(
       new FileOutputBuffer(wrapper.release(), 8 << 20 /* 8MB write buffer */, file_ptr));
 
@@ -1268,7 +1269,7 @@ Status FileOutputBuffer::Append(StringPiece data) {
 //  return OkStatus();
 
 
-    if(append_to_file_directly(data.data(), data.size(), file_) == 0) {
+    if(append_to_file_directly(data.data(), data.size(), file_stream_) == 0) {
         return OkStatus();
     } else {
         return errors::Internal("Fail to append to file");
