@@ -288,12 +288,14 @@ void GPUUtil::CopyGPUTensorToCPU(Device* gpu_device,
   send_device_to_host_stream->ThenWaitFor(send_stream);
 
   const int64_t total_bytes = gpu_tensor->TotalBytes();
+  VLOG(1) << "[tensor bytes] GPU tensor total bytes: " << total_bytes;
   if (total_bytes > 0) {
     void* src_ptr = GetBase(gpu_tensor);
     DeviceMemoryBase gpu_src_ptr(src_ptr, total_bytes);
     void* dst_ptr = GetBase(cpu_tensor);
     send_device_to_host_stream->ThenMemcpy(dst_ptr, gpu_src_ptr, total_bytes);
   }
+  VLOG(1) << "[tensor bytes] CPU tensor total bytes: " << cpu_tensor->TotalBytes();
   // Use of the input may outlive stack scope, so keep a ref.
   TensorReference input_ref(*gpu_tensor);
   dev_info->event_mgr->ThenExecute(
