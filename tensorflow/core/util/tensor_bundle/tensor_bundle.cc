@@ -426,7 +426,7 @@ BundleWriter::BundleWriter(Env* env, StringPiece prefix, const Options& options)
   if (!status_.ok()) return;
 
   data_path_ = DataFilename(prefix_, 0, 1);
-  tmp_data_path_ = "/tmp/test";
+  const string tmp_data_path_ = "/tmp/test";
   metadata_path_ = MetaFilename(prefix_);
   if (use_temp_file_) {
     data_path_ = strings::StrCat(data_path_, ".tempstate", random::New64());

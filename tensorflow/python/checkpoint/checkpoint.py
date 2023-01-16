@@ -1234,6 +1234,7 @@ class TrackableSaver:
         self._gather_serialized_tensors(object_graph_tensor))
 
     def _run_save():
+      start_time = time.time()
       """Create and execute the SaveOp for the checkpoint."""
       if (self._last_save_object_graph != graph_proto
           # When executing eagerly, we need to re-create SaveableObjects each
@@ -1248,12 +1249,15 @@ class TrackableSaver:
           with ops.control_dependencies([save_op]):
             self._cached_save_operation = array_ops.identity(file_prefix)
         self._last_save_object_graph = graph_proto
+      end_time = time.time()
+      print("Time to save op: ", end_time - start_time)
       return self._cached_save_operation, feed_additions
 
     def _copy_tensors():
       """Copy the tensors to the host CPU device."""
       for trackable in serialized_tensors:
         maybe_tensor = serialized_tensors[trackable]
+        print("maybe_tensor: ", maybe_tensor)
         if isinstance(maybe_tensor, ops.Tensor):
           serialized_tensors[trackable] = _copy_single_tensor(maybe_tensor)
         else:
@@ -1595,16 +1599,18 @@ def _convert_file_name_tensor_to_string(tensor):
 def _copy_single_tensor(tensor):
   """Copies a single Tensor / SaveSpec onto the CPU device."""
   device = tensor.device
+  print(f"original device:{device}")
   if isinstance(tensor, saveable_object_lib.SaveSpec):
     # Pin the device according to the tensor's device location to
     # avoid unnecessary data copies when reading the variables. This is
     # aligned with the behavior in MultiDeviceSaver.save().
     with ops.device(device):
       tensor = tensor.tensor
-
+  print(f"copy device_0:{tensor.device}")
   if tensor is not None:
     with ops.device(saveable_object_util.set_cpu0(device)):
-      tensor = array_ops.identity(tensor)  # pylint: disable=protected-access
+      tensor = array_ops.identity(tensor)
+  print(f"copy device_1:{tensor.device}")# pylint: disable=protected-access
   return tensor
 
 

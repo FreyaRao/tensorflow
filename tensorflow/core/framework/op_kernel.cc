@@ -22,7 +22,7 @@ limitations under the License.
 #include <unordered_map>
 #include <utility>
 #include <vector>
-
+#include <iostream>
 #include "absl/base/call_once.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/strings/match.h"
@@ -896,6 +896,7 @@ Status OpKernelContext::get_output_index(StringPiece name,
 }
 
 Status OpKernelContext::set_output(StringPiece name, const Tensor& tensor) {
+    std::cout << "set_output_0" << std::endl;
   int index;
   TF_RETURN_IF_ERROR(get_output_index(name, &index));
   set_output(index, tensor);
@@ -903,6 +904,7 @@ Status OpKernelContext::set_output(StringPiece name, const Tensor& tensor) {
 }
 
 Status OpKernelContext::set_output(StringPiece name, Tensor&& tensor) {
+    std::cout << "set_output_1" << std::endl;
   int index;
   TF_RETURN_IF_ERROR(get_output_index(name, &index));
   set_output(index, std::move(tensor));
