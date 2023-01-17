@@ -477,13 +477,14 @@ Status BundleWriter::Add(StringPiece key, const Tensor& val) {
     status_ = WriteTensor(val, out_.get(), &data_bytes_written);
     crc32c = out_->crc32c();
   }
-
   if (status_.ok()) {
     entry->set_size(data_bytes_written);
     entry->set_crc32c(crc32c::Mask(crc32c));
     size_ += data_bytes_written;
     status_ = PadAlignment(out_.get(), options_.data_alignment, &size_);
   }
+  VLOG(1) << "[tensor bytes] after persisting " << data_bytes_written
+          << " (total bytes: " << size_ << ")";
   return status_;
 }
 
