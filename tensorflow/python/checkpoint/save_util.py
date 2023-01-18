@@ -156,6 +156,9 @@ def _get_and_write_tensors_to_serialize(
       # or the compat saveable name decorator.
       trackable, tensor_dict = _get_tensors_from_legacy_saveable(
           td, node_ids, call_with_mapped_captures, object_graph_proto)
+      for k,v in tensor_dict.items():
+        print("nebula legacy k,v",k,v.device)
+        print("nebula legacy v.tensor",v.tensor.device)
     else:
       tensor_dict = _get_tensors_from_trackable(
           td, call_with_mapped_captures, object_graph_proto)

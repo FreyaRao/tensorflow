@@ -113,6 +113,7 @@ class SaveV2 : public OpKernel {
     OP_REQUIRES_OK(context, writer.status());
     VLOG(1) << "BundleWriter, prefix_string: " << prefix_string;
     start_0 = clock();
+    VLOG(1) << "tensor num: " << num_tensors;
     for (int i = 0; i < num_tensors; ++i) {
       const string& tensor_name = tensor_names_flat(i);
       const Tensor& tensor = context->input(i + kFixedInputs);

@@ -1257,7 +1257,6 @@ class TrackableSaver:
       """Copy the tensors to the host CPU device."""
       for trackable in serialized_tensors:
         maybe_tensor = serialized_tensors[trackable]
-        print("maybe_tensor: ", maybe_tensor)
         if isinstance(maybe_tensor, ops.Tensor):
           serialized_tensors[trackable] = _copy_single_tensor(maybe_tensor)
         else:
@@ -1327,6 +1326,7 @@ class TrackableSaver:
     Raises:
       RuntimeError: if called in V1 Graph mode without a default session.
     """
+    print("nebula Checkpoint.save")
     options = options or checkpoint_options.CheckpointOptions()
     feed_dict = {}
     use_session = (not context.executing_eagerly() and
@@ -2173,7 +2173,7 @@ class Checkpoint(autotrackable.AutoTrackable):
     attached_dependencies = None
     self._save_counter = None  # Created lazily for restore-on-create.
     self._save_assign_op = None
-
+    print("nebula root", root)
     if root:
       trackable_root = root() if isinstance(root, weakref.ref) else root
       _assert_trackable(trackable_root, "root")
